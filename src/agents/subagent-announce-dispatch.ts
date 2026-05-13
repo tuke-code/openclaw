@@ -1,4 +1,10 @@
-type SubagentDeliveryPath = "steered" | "direct" | "none";
+type SubagentDeliveryPath =
+  | "queued"
+  | "steered"
+  | "direct"
+  | "direct-fallback"
+  | "direct-thread-fallback"
+  | "none";
 
 type SubagentAnnounceSteerOutcome =
   | { status: "steered"; deliveredAt?: number; enqueuedAt?: number }

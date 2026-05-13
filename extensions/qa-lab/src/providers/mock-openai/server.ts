@@ -2164,7 +2164,11 @@ async function buildResponsesPayload(
       : [];
     const preferredSessionResult = results.find((result) => {
       const resultPath = typeof result.path === "string" ? result.path : undefined;
-      return result.source === "sessions" || resultPath?.startsWith("sessions/");
+      return (
+        result.source === "sessions" ||
+        resultPath?.startsWith("sessions/") ||
+        resultPath?.startsWith("transcript:")
+      );
     });
     if (preferredSessionResult) {
       return buildAssistantEvents(

@@ -9,6 +9,7 @@ import {
 import { createSuiteTempRootTracker } from "../test-helpers/temp-dir.js";
 import { GATEWAY_CLIENT_MODES, GATEWAY_CLIENT_NAMES } from "../utils/message-channel.js";
 import {
+  issueOperatorToken,
   loadDeviceIdentity,
   openTrackedWs,
   pairDeviceIdentity,
@@ -60,6 +61,52 @@ async function connectNodeClient(params: {
   });
 }
 
+async function expectPairingApprovalRejected(params: {
+  started: Awaited<ReturnType<typeof startServerWithClient>>;
+  nodeId: string;
+  approverName: string;
+  tokenScopes: string[];
+  connectedScopes: string[];
+  requestCommands?: string[];
+  expectedMessage: string;
+}) {
+  const { started } = params;
+  const approver = await issueOperatorToken({
+    name: params.approverName,
+    approvedScopes: ["operator.admin"],
+    tokenScopes: params.tokenScopes,
+    clientId: GATEWAY_CLIENT_NAMES.TEST,
+    clientMode: GATEWAY_CLIENT_MODES.TEST,
+  });
+
+  let pairingWs: WebSocket | undefined;
+  try {
+    const request = await requestNodePairing({
+      nodeId: params.nodeId,
+      platform: "macos",
+      deviceFamily: "Mac",
+      ...(params.requestCommands ? { commands: params.requestCommands } : {}),
+    });
+
+    pairingWs = await openTrackedWs(started.port);
+    await connectOk(pairingWs, {
+      skipDefaultAuth: true,
+      deviceToken: approver.token,
+      deviceIdentityKey: approver.identityKey,
+      scopes: params.connectedScopes,
+    });
+
+    const approve = await rpcReq(pairingWs, "node.pair.approve", {
+      requestId: request.request.requestId,
+    });
+    expect(approve.ok).toBe(false);
+    expect(approve.error?.message).toBe(params.expectedMessage);
+
+    await expect(getPairedNode(params.nodeId)).resolves.toBeNull();
+  } finally {
+    pairingWs?.close();
+  }
+}
 async function expectRePairingRequest(params: {
   started: Awaited<ReturnType<typeof startServerWithClient>>;
   pairedName: string;

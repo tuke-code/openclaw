@@ -1,6 +1,5 @@
 import fs from "node:fs";
 import { request } from "node:http";
-import path from "node:path";
 import type { Command } from "commander";
 import type {
   ConfigFileSnapshot,
@@ -9,7 +8,8 @@ import type {
   GatewayTailscaleMode,
   ReadConfigFileSnapshotWithPluginMetadataResult,
 } from "../../config/config.js";
-import { CONFIG_PATH, resolveGatewayPort, resolveStateDir } from "../../config/paths.js";
+import { CONFIG_AUDIT_STORE_LABEL } from "../../config/io.audit.js";
+import { CONFIG_PATH, resolveGatewayPort } from "../../config/paths.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { hasConfiguredSecretInput } from "../../config/types.secrets.js";
 import { GATEWAY_SERVICE_RUNTIME_PID_ENV } from "../../daemon/constants.js";
@@ -60,7 +60,6 @@ type GatewayRunOpts = {
   wsLog?: unknown;
   compact?: boolean;
   rawStream?: boolean;
-  rawStreamPath?: unknown;
   dev?: boolean;
   reset?: boolean;
 };
@@ -76,7 +75,6 @@ const GATEWAY_RUN_VALUE_KEYS = [
   "passwordFile",
   "tailscale",
   "wsLog",
-  "rawStreamPath",
 ] as const;
 
 const GATEWAY_RUN_BOOLEAN_KEYS = [
@@ -252,7 +250,7 @@ async function maybeLogPendingControlUiBuild(cfg: OpenClawConfig): Promise<void>
 function getGatewayStartGuardErrors(params: {
   allowUnconfigured?: boolean;
   configExists: boolean;
-  configAuditPath: string;
+  configAuditLocation: string;
   mode: string | undefined;
 }): string[] {
   if (params.allowUnconfigured || params.mode === "local") {
@@ -270,12 +268,12 @@ function getGatewayStartGuardErrors(params: {
         "Treat this as suspicious or clobbered config.",
         `Re-run \`${formatCliCommand("openclaw onboard --mode local")}\` or \`${formatCliCommand("openclaw setup")}\`, set gateway.mode=local manually, or pass --allow-unconfigured.`,
       ].join(" "),
-      `Config write audit: ${params.configAuditPath}`,
+      `Config write audit: ${params.configAuditLocation}`,
     ];
   }
   return [
     `Gateway start blocked: set gateway.mode=local (current: ${params.mode}) or pass --allow-unconfigured.`,
-    `Config write audit: ${params.configAuditPath}`,
+    `Config write audit: ${params.configAuditLocation}`,
   ];
 }
 
@@ -499,10 +497,6 @@ export async function runGatewayCommand(opts: GatewayRunOpts) {
   if (opts.rawStream) {
     process.env.OPENCLAW_RAW_STREAM = "1";
   }
-  const rawStreamPath = toOptionString(opts.rawStreamPath);
-  if (rawStreamPath) {
-    process.env.OPENCLAW_RAW_STREAM_PATH = rawStreamPath;
-  }
 
   const startupTrace = createGatewayCliStartupTrace();
 
@@ -682,13 +676,12 @@ export async function runGatewayCommand(opts: GatewayRunOpts) {
 
   gatewayLog.info("resolving authentication…");
   const configExists = snapshot?.exists ?? fs.existsSync(CONFIG_PATH);
-  const configAuditPath = path.join(resolveStateDir(process.env), "logs", "config-audit.jsonl");
   const effectiveCfg = snapshot?.valid ? snapshot.config : cfg;
   const mode = effectiveCfg.gateway?.mode;
   const guardErrors = getGatewayStartGuardErrors({
     allowUnconfigured: opts.allowUnconfigured,
     configExists,
-    configAuditPath,
+    configAuditLocation: CONFIG_AUDIT_STORE_LABEL,
     mode,
   });
   if (guardErrors.length > 0) {

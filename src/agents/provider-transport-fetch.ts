@@ -1,4 +1,3 @@
-import type { Api, Model } from "@earendil-works/pi-ai";
 import {
   fetchWithSsrFGuard,
   withTrustedEnvProxyGuardedFetchMode,
@@ -19,6 +18,7 @@ import {
 } from "../shared/net/ip.js";
 import { emitModelTransportDebug } from "./model-transport-debug.js";
 import { formatModelTransportDebugUrl } from "./model-transport-url.js";
+import type { Api, Model } from "./pi-ai-contract.js";
 import {
   ensureModelProviderLocalService,
   type ProviderLocalServiceLease,
@@ -515,7 +515,7 @@ export function buildGuardedModelFetch(
       `code=${read(record.code)}`,
       `causeName=${read(cause?.name)}`,
       `causeCode=${read(cause?.code)}`,
-      `message=${error instanceof Error ? error.message : read(record.message)}`,
+      `message=${error instanceof Error ? error.message : typeof error}`,
     ].join(" ");
   };
   return async (input, init) => {

@@ -103,7 +103,7 @@ export type GatewayStatusSummary = {
   providerSummary?: string[];
   queuedSystemEvents?: string[];
   sessions?: {
-    paths?: string[];
+    databasePaths?: string[];
     count?: number;
     defaults?: { model?: string | null; contextTokens?: number | null };
     recent?: Array<{

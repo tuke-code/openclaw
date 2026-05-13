@@ -1,5 +1,6 @@
-import { updateSessionStore } from "../../config/sessions/store.js";
+import { patchSessionEntry } from "../../config/sessions/store.js";
 import { mergeSessionEntry, type SessionEntry } from "../../config/sessions/types.js";
+import { resolveAgentIdFromSessionKey } from "../../routing/session-key.js";
 import {
   formatAgentInternalEventsForPlainPrompt,
   formatAgentInternalEventsForPrompt,
@@ -11,9 +12,8 @@ import {
 import type { AgentCommandOpts } from "./types.js";
 
 export type PersistSessionEntryParams = {
-  sessionStore: Record<string, SessionEntry>;
+  sessionStore?: Record<string, SessionEntry>;
   sessionKey: string;
-  storePath: string;
   entry: SessionEntry;
   clearedFields?: string[];
   shouldPersist?: (entry: SessionEntry | undefined) => boolean;
@@ -22,24 +22,29 @@ export type PersistSessionEntryParams = {
 export async function persistSessionEntry(
   params: PersistSessionEntryParams,
 ): Promise<SessionEntry | undefined> {
-  const persisted = await updateSessionStore(params.storePath, (store) => {
-    const current = store[params.sessionKey];
-    if (params.shouldPersist && !params.shouldPersist(current)) {
-      return current;
-    }
-    const merged = mergeSessionEntry(store[params.sessionKey], params.entry);
-    for (const field of params.clearedFields ?? []) {
-      if (!Object.hasOwn(params.entry, field)) {
-        Reflect.deleteProperty(merged, field);
+  const agentId = resolveAgentIdFromSessionKey(params.sessionKey);
+  if (!agentId) {
+    throw new Error(`Cannot resolve session agent for ${params.sessionKey}`);
+  }
+  const persisted = await patchSessionEntry({
+    agentId,
+    sessionKey: params.sessionKey,
+    fallbackEntry: params.sessionStore?.[params.sessionKey] ?? params.entry,
+    update: (existing) => {
+      if (params.shouldPersist && !params.shouldPersist(existing)) {
+        return existing;
       }
-    }
-    store[params.sessionKey] = merged;
-    return merged;
+      const merged = mergeSessionEntry(existing, params.entry);
+      for (const field of params.clearedFields ?? []) {
+        if (!Object.hasOwn(params.entry, field)) {
+          (merged as Record<string, unknown>)[field] = undefined;
+        }
+      }
+      return merged;
+    },
   });
-  if (persisted) {
+  if (persisted && params.sessionStore) {
     params.sessionStore[params.sessionKey] = persisted;
-  } else {
-    delete params.sessionStore[params.sessionKey];
   }
   return persisted;
 }

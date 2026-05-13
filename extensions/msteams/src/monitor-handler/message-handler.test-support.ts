@@ -52,7 +52,6 @@ export function createMessageHandlerDeps(
     createInboundDebouncer: options.createInboundDebouncer,
     resolveInboundDebounceMs: options.resolveInboundDebounceMs,
     resolveTextChunkLimit: () => 4000,
-    resolveStorePath: () => "/tmp/test-store",
   });
 
   const conversationStore = {

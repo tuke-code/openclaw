@@ -1,12 +1,14 @@
+import path from "node:path";
 import { resolveModelAgentRuntimeMetadata } from "../agents/agent-runtime-metadata.js";
 import { DEFAULT_CONTEXT_TOKENS } from "../agents/defaults.js";
 import { resolveRuntimePolicySessionKey } from "../auto-reply/reply/runtime-policy-session-key.js";
 import { normalizeChatType } from "../channels/chat-type.js";
 import { getRuntimeConfig } from "../config/config.js";
-import { loadSessionStore, resolveSessionTotalTokens } from "../config/sessions.js";
+import { listSessionEntries, resolveSessionTotalTokens } from "../config/sessions.js";
 import type { SessionEntry } from "../config/sessions/types.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { info } from "../globals.js";
+import { writeTextAtomic } from "../infra/json-files.js";
 import { parseAgentSessionKey } from "../routing/session-key.js";
 import { type RuntimeEnv, writeRuntimeJson } from "../runtime.js";
 import { classifySessionKind, type SessionKind } from "../sessions/classify-session-kind.js";
@@ -18,7 +20,10 @@ import {
 } from "../shared/string-coerce.js";
 import { resolveAgentRuntimeLabel } from "../status/agent-runtime-label.js";
 import { isRich, theme } from "../terminal/theme.js";
-import { resolveSessionStoreTargetsOrExit } from "./session-store-targets.js";
+import {
+  resolveSessionDatabaseTargetsOrExit,
+  type SessionDatabaseTarget,
+} from "./session-database-targets.js";
 import {
   resolveSessionDisplayModelRef,
   resolveSessionDisplayDefaults,
@@ -39,6 +44,7 @@ type SessionRow = SessionDisplayRow & {
   agentId: string;
   kind: SessionKind;
   agentRuntime: ReturnType<typeof resolveModelAgentRuntimeMetadata>;
+  runtimePolicySessionKey?: string;
   runtimeLabel: string;
   /**
    * True only when the session entry has persisted ACP runtime metadata
@@ -219,6 +225,49 @@ function formatRuntimeCell(runtimeLabel: string, rich: boolean): string {
   return rich ? theme.info(label) : label;
 }
 
+async function exportRawSessionStores(params: {
+  targets: SessionDatabaseTarget[];
+  outputPath: string;
+}): Promise<{
+  outputPath: string;
+  count: number;
+  stores: Array<{ agentId: string; path: string }>;
+}> {
+  const stores = params.targets.map((target) => {
+    const sessions = Object.fromEntries(
+      listSessionEntries({ agentId: target.agentId }).map(({ sessionKey, entry }) => [
+        sessionKey,
+        entry,
+      ]),
+    );
+    return {
+      agentId: target.agentId,
+      path: target.databasePath,
+      sessions,
+      count: Object.keys(sessions).length,
+    };
+  });
+  const single = stores.length === 1 ? stores[0]?.sessions : undefined;
+  const payload =
+    single !== undefined
+      ? single
+      : {
+          stores: stores.map((store) => ({
+            agentId: store.agentId,
+            path: store.path,
+            count: store.count,
+            sessions: store.sessions,
+          })),
+        };
+  const outputPath = path.resolve(params.outputPath);
+  await writeTextAtomic(outputPath, `${JSON.stringify(payload, null, 2)}\n`, { mode: 0o600 });
+  return {
+    outputPath,
+    count: stores.reduce((sum, store) => sum + store.count, 0),
+    stores: stores.map((store) => ({ agentId: store.agentId, path: store.path })),
+  };
+}
+
 function toJsonSessionRow(row: SessionRow): Omit<SessionRow, "runtimeLabel"> {
   const { runtimeLabel, ...jsonRow } = row;
   void runtimeLabel;
@@ -298,11 +347,11 @@ function resolveDisplayRuntimePolicySessionKey(params: {
 export async function sessionsCommand(
   opts: {
     json?: boolean;
-    store?: string;
     active?: string;
     agent?: string;
     allAgents?: boolean;
     limit?: string | number;
+    exportStore?: string;
   },
   runtime: RuntimeEnv,
 ) {
@@ -314,16 +363,32 @@ export async function sessionsCommand(
     configuredContextTokens ??
     (await lookupContextTokensForDisplay(displayDefaults.model)) ??
     DEFAULT_CONTEXT_TOKENS;
-  const targets = resolveSessionStoreTargetsOrExit({
+  const targets = resolveSessionDatabaseTargetsOrExit({
     cfg,
     opts: {
-      store: opts.store,
       agent: opts.agent,
       allAgents: opts.allAgents,
     },
     runtime,
   });
   if (!targets) {
+    return;
+  }
+
+  if (opts.exportStore) {
+    const exported = await exportRawSessionStores({
+      targets,
+      outputPath: opts.exportStore,
+    });
+    if (opts.json) {
+      writeRuntimeJson(runtime, {
+        exportedPath: exported.outputPath,
+        count: exported.count,
+        stores: exported.stores,
+      });
+    } else {
+      runtime.log(info(`Exported ${exported.count} session(s) to ${exported.outputPath}`));
+    }
     return;
   }
 
@@ -345,25 +410,19 @@ export async function sessionsCommand(
     return;
   }
 
-  const allRows = targets.flatMap((target) => {
-    const store = loadSessionStore(target.storePath);
-    return Object.entries(store)
-      .filter(([, entry]) => {
+  const allRows = targets.flatMap((target) =>
+    listSessionEntries({ agentId: target.agentId })
+      .filter(({ entry }) => {
         if (activeMinutes === undefined) {
           return true;
         }
         const updatedAt = entry?.updatedAt;
         return typeof updatedAt === "number" && Date.now() - updatedAt <= activeMinutes * 60_000;
       })
-      .map(([key, entry]) => {
+      .map(({ sessionKey: key, entry }) => {
         const row = toSessionDisplayRow(key, entry);
         const agentId = parseAgentSessionKey(row.key)?.agentId ?? target.agentId;
-        const acpRuntime = entry?.acp != null;
-        const modelRef = applyAcpModelOverlayIfNeeded(
-          resolveSessionDisplayModelRef(cfg, row),
-          row.key,
-          acpRuntime,
-        );
+        const modelRef = resolveSessionDisplayModelRef(cfg, { ...row, agentId });
         const agentRuntime = resolveModelAgentRuntimeMetadata({
           cfg,
           agentId,
@@ -377,12 +436,12 @@ export async function sessionsCommand(
           agentId,
           acpRuntime,
           agentRuntime,
-          kind: classifySessionKind(row.key, store[row.key]),
           runtimePolicySessionKey: resolveDisplayRuntimePolicySessionKey({
             cfg,
             key: row.key,
             entry,
           }),
+          kind: classifySessionKind(row.key, entry),
           runtimeLabel: resolveSessionRuntimeLabel({
             cfg,
             entry,
@@ -393,8 +452,8 @@ export async function sessionsCommand(
             sessionKey: row.key,
           }),
         });
-      });
-  });
+      }),
+  );
   const totalCount = allRows.length;
   const rows = selectNewestSessionRows(allRows, limit);
   const hasMore = rows.length < totalCount;
@@ -403,11 +462,11 @@ export async function sessionsCommand(
     const multi = targets.length > 1;
     const aggregate = aggregateAgents || multi;
     writeRuntimeJson(runtime, {
-      path: aggregate ? null : (targets[0]?.storePath ?? null),
-      stores: aggregate
+      databasePath: aggregate ? null : (targets[0]?.databasePath ?? null),
+      databases: aggregate
         ? targets.map((target) => ({
             agentId: target.agentId,
-            path: target.storePath,
+            path: target.databasePath,
           }))
         : undefined,
       allAgents: aggregateAgents ? true : undefined,
@@ -445,10 +504,10 @@ export async function sessionsCommand(
   }
 
   if (targets.length === 1 && !aggregateAgents) {
-    runtime.log(info(`Session store: ${targets[0]?.storePath}`));
+    runtime.log(info(`Session database: ${targets[0]?.databasePath}`));
   } else {
     runtime.log(
-      info(`Session stores: ${targets.length} (${targets.map((t) => t.agentId).join(", ")})`),
+      info(`Session databases: ${targets.length} (${targets.map((t) => t.agentId).join(", ")})`),
     );
   }
   runtime.log(

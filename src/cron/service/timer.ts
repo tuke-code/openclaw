@@ -1,27 +1,18 @@
 import { resolveFailoverReasonFromError } from "../../agents/failover-error.js";
 import { formatEmbeddedAgentExecutionPhase } from "../../agents/pi-embedded-runner/execution-phase.js";
-import { readSessionEntry } from "../../config/sessions/store-load.js";
-import type { SessionEntry } from "../../config/sessions/types.js";
-import type { CronConfig } from "../../config/types.cron.js";
+import type { CronConfig, CronRetryOn } from "../../config/types.cron.js";
 import type { HeartbeatRunResult } from "../../infra/heartbeat-wake.js";
 import {
   HEARTBEAT_SKIP_CRON_IN_PROGRESS,
   isRetryableHeartbeatBusySkipReason,
 } from "../../infra/heartbeat-wake.js";
-import {
-  DEFAULT_AGENT_ID,
-  isSubagentSessionKey,
-  normalizeAgentId,
-  resolveAgentIdFromSessionKey,
-} from "../../routing/session-key.js";
+import { isSubagentSessionKey } from "../../routing/session-key.js";
 import { normalizeOptionalLowercaseString } from "../../shared/string-coerce.js";
 import {
   completeTaskRunByRunId,
   createRunningTaskRun,
   failTaskRunByRunId,
 } from "../../tasks/detached-task-runtime.js";
-import { deliveryContextFromSession } from "../../utils/delivery-context.shared.js";
-import type { DeliveryContext } from "../../utils/delivery-context.types.js";
 import { clearCronJobActive, markCronJobActive } from "../active-jobs.js";
 import { resolveCronDeliveryPlan, resolveFailureDestination } from "../delivery-plan.js";
 import { resolveCronAgentSessionKey } from "../isolated-agent/session-key.js";
@@ -32,7 +23,6 @@ import {
   summarizeCronRunDiagnostics,
 } from "../run-diagnostics.js";
 import { createCronExecutionId } from "../run-id.js";
-import { sweepCronRunSessions } from "../session-reaper.js";
 import type {
   CronAgentExecutionPhase,
   CronAgentExecutionPhaseUpdate,
@@ -430,54 +420,10 @@ export function normalizeCronRunErrorText(err: unknown): string {
   return String(err);
 }
 
-function normalizeCronLaneSegment(value: string | undefined, fallback: string): string {
-  const normalized = normalizeOptionalLowercaseString(value)
-    ?.replace(/[^a-z0-9_-]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 64);
-  return normalized || fallback;
-}
-
-function resolveMainSessionCronRunSessionKey(job: CronJob, startedAt: number): string {
-  const explicitAgentId = job.agentId?.trim();
-  const agentId = normalizeAgentId(explicitAgentId || resolveAgentIdFromSessionKey(job.sessionKey));
-  const jobSegment = normalizeCronLaneSegment(job.id, "job");
-  const runSegment = normalizeCronLaneSegment(String(Math.max(0, Math.floor(startedAt))), "run");
-  return `agent:${agentId}:cron:${jobSegment}:run:${runSegment}`;
-}
-
-function resolveMainSessionCronDeliveryContext(
-  state: CronServiceState,
-  job: CronJob,
-): DeliveryContext | undefined {
-  const targetSessionKey = job.sessionKey?.trim();
-  if (!targetSessionKey) {
-    return undefined;
-  }
-  const explicitAgentId = job.agentId?.trim();
-  const agentId = normalizeAgentId(
-    explicitAgentId || resolveAgentIdFromSessionKey(targetSessionKey),
-  );
-  const storePath = state.deps.resolveSessionStorePath?.(agentId) ?? state.deps.sessionStorePath;
-  if (!storePath) {
-    return undefined;
-  }
-  try {
-    const sessionEntry = readSessionEntry(storePath, targetSessionKey) as SessionEntry | undefined;
-    return deliveryContextFromSession(sessionEntry);
-  } catch {
-    return undefined;
-  }
-}
-
 function resolveCronTaskChildSessionKey(params: {
   state: CronServiceState;
   job: CronJob;
-  startedAt: number;
 }): string | undefined {
-  if (params.job.sessionTarget === "main") {
-    return resolveMainSessionCronRunSessionKey(params.job, params.startedAt);
-  }
   const explicitSessionKey = params.job.sessionKey?.trim();
   if (explicitSessionKey) {
     return explicitSessionKey;
@@ -1318,42 +1264,6 @@ export async function onTimer(state: CronServiceState) {
       });
     }
   } finally {
-    // Piggyback session reaper on timer tick (self-throttled to every 5 min).
-    // Placed in `finally` so the reaper runs even when a long-running job keeps
-    // `state.running` true across multiple timer ticks — the early return at the
-    // top of onTimer would otherwise skip the reaper indefinitely.
-    const storePaths = new Set<string>();
-    if (state.deps.resolveSessionStorePath) {
-      const defaultAgentId = state.deps.defaultAgentId ?? DEFAULT_AGENT_ID;
-      if (state.store?.jobs?.length) {
-        for (const job of state.store.jobs) {
-          const agentId =
-            typeof job.agentId === "string" && job.agentId.trim() ? job.agentId : defaultAgentId;
-          storePaths.add(state.deps.resolveSessionStorePath(agentId));
-        }
-      } else {
-        storePaths.add(state.deps.resolveSessionStorePath(defaultAgentId));
-      }
-    } else if (state.deps.sessionStorePath) {
-      storePaths.add(state.deps.sessionStorePath);
-    }
-
-    if (storePaths.size > 0) {
-      const nowMs = state.deps.nowMs();
-      for (const storePath of storePaths) {
-        try {
-          await sweepCronRunSessions({
-            cronConfig: state.deps.cronConfig,
-            sessionStorePath: storePath,
-            nowMs,
-            log: state.deps.log,
-          });
-        } catch (err) {
-          state.deps.log.warn({ err: String(err), storePath }, "cron: session reaper sweep failed");
-        }
-      }
-    }
-
     state.running = false;
     armTimer(state);
   }
@@ -1743,15 +1653,11 @@ async function executeMainSessionCronJob(
           : 'main job requires payload.kind="systemEvent"',
     };
   }
-  const cronStartedAt =
-    typeof job.state.runningAtMs === "number" ? job.state.runningAtMs : state.deps.nowMs();
-  const cronRunSessionKey = resolveMainSessionCronRunSessionKey(job, cronStartedAt);
-  const deliveryContext = resolveMainSessionCronDeliveryContext(state, job);
+  const targetMainSessionKey = job.sessionKey;
   state.deps.enqueueSystemEvent(text, {
     agentId: job.agentId,
-    sessionKey: cronRunSessionKey,
+    sessionKey: targetMainSessionKey,
     contextKey: `cron:${job.id}`,
-    ...(deliveryContext ? { deliveryContext } : {}),
   });
   if (job.wakeMode === "now" && state.deps.runHeartbeatOnce) {
     const reason = `cron:${job.id}`;
@@ -1769,7 +1675,7 @@ async function executeMainSessionCronJob(
         intent: "immediate",
         reason,
         agentId: job.agentId,
-        sessionKey: cronRunSessionKey,
+        sessionKey: targetMainSessionKey,
         heartbeat: { target: "last" },
       });
       if (
@@ -1785,10 +1691,10 @@ async function executeMainSessionCronJob(
           intent: "immediate",
           reason,
           agentId: job.agentId,
-          sessionKey: cronRunSessionKey,
+          sessionKey: targetMainSessionKey,
           heartbeat: { target: "last" },
         });
-        return { status: "ok", summary: text, sessionKey: cronRunSessionKey };
+        return { status: "ok", summary: text };
       }
       if (abortSignal?.aborted) {
         return { status: "error", error: timeoutErrorMessage() };
@@ -1802,31 +1708,21 @@ async function executeMainSessionCronJob(
           intent: "immediate",
           reason,
           agentId: job.agentId,
-          sessionKey: cronRunSessionKey,
+          sessionKey: targetMainSessionKey,
           heartbeat: { target: "last" },
         });
-        return { status: "ok", summary: text, sessionKey: cronRunSessionKey };
+        return { status: "ok", summary: text };
       }
       await waitWithAbort(retryDelayMs);
     }
 
     if (heartbeatResult.status === "ran") {
-      return { status: "ok", summary: text, sessionKey: cronRunSessionKey };
+      return { status: "ok", summary: text };
     }
     if (heartbeatResult.status === "skipped") {
-      return {
-        status: "skipped",
-        error: heartbeatResult.reason,
-        summary: text,
-        sessionKey: cronRunSessionKey,
-      };
+      return { status: "skipped", error: heartbeatResult.reason, summary: text };
     }
-    return {
-      status: "error",
-      error: heartbeatResult.reason,
-      summary: text,
-      sessionKey: cronRunSessionKey,
-    };
+    return { status: "error", error: heartbeatResult.reason, summary: text };
   }
 
   if (abortSignal?.aborted) {
@@ -1837,10 +1733,10 @@ async function executeMainSessionCronJob(
     intent: job.wakeMode === "now" ? "immediate" : "event",
     reason: `cron:${job.id}`,
     agentId: job.agentId,
-    sessionKey: cronRunSessionKey,
+    sessionKey: targetMainSessionKey,
     heartbeat: { target: "last" },
   });
-  return { status: "ok", summary: text, sessionKey: cronRunSessionKey };
+  return { status: "ok", summary: text };
 }
 
 async function executeDetachedCronJob(
@@ -2020,25 +1916,6 @@ export function wake(
       intent: "immediate",
       reason: "wake",
       ...(sessionKey ? { sessionKey } : {}),
-    });
-  } else if (sessionKey) {
-    // next-heartbeat + sessionKey still needs a targeted immediate wake.
-    // Reasons:
-    //   1. The regularly-scheduled heartbeat fires for the agent's main
-    //      session, not the supplied sessionKey, so it never peeks the queue
-    //      we just enqueued — the event would sit stranded indefinitely.
-    //   2. An `intent: "event"` wake gets deferred by heartbeat-runner as
-    //      not-due and is not retried (only busy-skips are), so it cannot
-    //      stand in for the regular cadence either.
-    // Effectively, --session-key collapses --mode now and --mode next-heartbeat
-    // into the same targeted-immediate behavior — this matches the documented
-    // user intent (target a specific session for relay) better than silently
-    // dropping the event.
-    state.deps.requestHeartbeat({
-      source: "manual",
-      intent: "immediate",
-      reason: "wake",
-      sessionKey,
     });
   }
   return { ok: true } as const;

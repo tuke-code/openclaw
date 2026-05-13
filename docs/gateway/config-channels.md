@@ -790,13 +790,12 @@ Group messages default to **require mention** (metadata mention or safe regex pa
 
 Visible replies are controlled separately. Normal group and channel requests default to automatic final delivery: final assistant text posts through the legacy visible reply path. Some harnesses, including Codex, default direct/source chats to message-tool delivery so visible output only posts after the agent calls `message(action=send)`. If the model returns final text without calling the message tool, that final text stays private and the gateway verbose log records suppressed payload metadata.
 
-Tool-only visible replies require a model/runtime that reliably calls tools, and are recommended for shared ambient rooms on latest-generation models such as GPT 5.5. If
-the session log shows assistant text with `didSendViaMessagingTool: false`, the
-model produced private final text instead of calling the message tool. Switch
-to a stronger tool-calling model for that channel, inspect the gateway verbose
-log for the suppressed payload summary, or set
-`messages.groupChat.visibleReplies: "automatic"` to use visible final replies
-for every group/channel request.
+Tool-only visible replies require a model/runtime that reliably calls tools. If
+the gateway verbose log or SQLite transcript shows assistant text with
+`didSendViaMessagingTool: false`, the model produced private final text instead
+of calling the message tool. Switch to a stronger tool-calling model for that
+channel, or set `messages.groupChat.visibleReplies: "automatic"` to use legacy
+visible final replies for every group/channel request.
 
 If the message tool is unavailable under the active tool policy, OpenClaw falls back to automatic visible replies instead of silently suppressing the response. `openclaw doctor` warns about this mismatch.
 

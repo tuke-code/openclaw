@@ -8,7 +8,9 @@ import {
 } from "../agents/subagent-registry.test-helpers.js";
 import type { OpenClawConfig } from "../config/config.js";
 import type { SessionEntry } from "../config/sessions.js";
+import { replaceSqliteSessionTranscriptEvents } from "../config/sessions/transcript-store.sqlite.js";
 import { registerAgentRunContext, resetAgentRunContextForTest } from "../infra/agent-events.js";
+import { closeOpenClawStateDatabaseForTest } from "../state/openclaw-state-db.js";
 import { listSessionsFromStore } from "./session-utils.js";
 
 function createModelDefaultsConfig(params: {
@@ -53,16 +55,18 @@ function withTranscriptStoreFixture<T>(params: {
   output: number;
   cacheRead: number;
   costTotal: number;
-  run: (fixture: { storePath: string; now: number }) => T;
+  run: (fixture: { now: number }) => T;
 }): T {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), params.prefix));
-  const storePath = path.join(tmpDir, "sessions.json");
   const now = Date.now();
-  fs.writeFileSync(
-    path.join(tmpDir, `${params.transcriptId}.jsonl`),
-    [
-      JSON.stringify({ type: "session", version: 1, id: params.transcriptId }),
-      JSON.stringify({
+  const previousStateDir = process.env.OPENCLAW_STATE_DIR;
+  process.env.OPENCLAW_STATE_DIR = tmpDir;
+  replaceSqliteSessionTranscriptEvents({
+    agentId: "main",
+    sessionId: params.transcriptId,
+    events: [
+      { type: "session", version: 1, id: params.transcriptId },
+      {
         message: {
           role: "assistant",
           provider: params.provider,
@@ -74,14 +78,19 @@ function withTranscriptStoreFixture<T>(params: {
             cost: { total: params.costTotal },
           },
         },
-      }),
-    ].join("\n"),
-    "utf-8",
-  );
+      },
+    ],
+  });
 
   try {
-    return params.run({ storePath, now });
+    return params.run({ now });
   } finally {
+    closeOpenClawStateDatabaseForTest();
+    if (previousStateDir === undefined) {
+      delete process.env.OPENCLAW_STATE_DIR;
+    } else {
+      process.env.OPENCLAW_STATE_DIR = previousStateDir;
+    }
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 }
@@ -100,15 +109,9 @@ function createAnthropicContext1mConfig(): OpenClawConfig {
   } as unknown as OpenClawConfig;
 }
 
-function listSingleSession(params: {
-  cfg: OpenClawConfig;
-  storePath: string;
-  key: string;
-  entry: SessionEntry;
-}) {
+function listSingleSession(params: { cfg: OpenClawConfig; key: string; entry: SessionEntry }) {
   return listSessionsFromStore({
     cfg: params.cfg,
-    storePath: params.storePath,
     store: {
       [params.key]: params.entry,
     },
@@ -153,7 +156,6 @@ describe("listSessionsFromStore search", () => {
     for (const testCase of cases) {
       const result = listSessionsFromStore({
         cfg: baseCfg,
-        storePath: "/tmp/sessions.json",
         store: makeStore(),
         opts: testCase.opts,
       });
@@ -176,7 +178,6 @@ describe("listSessionsFromStore search", () => {
     for (const testCase of cases) {
       const result = listSessionsFromStore({
         cfg: baseCfg,
-        storePath: "/tmp/sessions.json",
         store: makeStore(),
         opts: { search: testCase.search },
       });
@@ -254,7 +255,6 @@ describe("listSessionsFromStore search", () => {
 
     const result = listSessionsFromStore({
       cfg: baseCfg,
-      storePath: "/tmp/sessions.json",
       store,
       opts: {},
     });
@@ -286,7 +286,6 @@ describe("listSessionsFromStore search", () => {
   ])("$name", ({ cfg, runtimeModel, expectedProvider }) => {
     const result = listSessionsFromStore({
       cfg,
-      storePath: "/tmp/sessions.json",
       store: createLegacyRuntimeStore(runtimeModel),
       opts: {},
     });
@@ -320,7 +319,6 @@ describe("listSessionsFromStore search", () => {
 
     const result = listSessionsFromStore({
       cfg: baseCfg,
-      storePath: "/tmp/sessions.json",
       store,
       opts: {},
     });
@@ -357,7 +355,6 @@ describe("listSessionsFromStore search", () => {
     } as unknown as OpenClawConfig;
     const result = listSessionsFromStore({
       cfg,
-      storePath: "/tmp/sessions.json",
       store: {
         "agent:main:main": {
           sessionId: "sess-main",
@@ -386,10 +383,9 @@ describe("listSessionsFromStore search", () => {
       output: 500,
       cacheRead: 1_200,
       costTotal: 0.007725,
-      run: ({ storePath, now }) => {
+      run: ({ now }) => {
         const result = listSingleSession({
           cfg: baseCfg,
-          storePath,
           key: "agent:main:main",
           entry: {
             sessionId: "sess-main",
@@ -429,7 +425,6 @@ describe("listSessionsFromStore search", () => {
     } as unknown as OpenClawConfig;
     const result = listSessionsFromStore({
       cfg,
-      storePath: "/tmp/sessions.json",
       store: {
         "agent:main:main": {
           sessionId: "sess-main",
@@ -458,10 +453,9 @@ describe("listSessionsFromStore search", () => {
       output: 1_827,
       cacheRead: 1_536,
       costTotal: 0,
-      run: ({ storePath, now }) => {
+      run: ({ now }) => {
         const result = listSingleSession({
           cfg: baseCfg,
-          storePath,
           key: "agent:main:main",
           entry: {
             sessionId: "sess-main",
@@ -494,10 +488,9 @@ describe("listSessionsFromStore search", () => {
       output: 500,
       cacheRead: 1_200,
       costTotal: 0.007725,
-      run: ({ storePath, now }) => {
+      run: ({ now }) => {
         const result = listSingleSession({
           cfg: createAnthropicContext1mConfig(),
-          storePath,
           key: "agent:main:main",
           entry: {
             sessionId: "sess-main",
@@ -531,7 +524,7 @@ describe("listSessionsFromStore search", () => {
       output: 500,
       cacheRead: 1_200,
       costTotal: 0.007725,
-      run: ({ storePath, now }) => {
+      run: ({ now }) => {
         addSubagentRunForTests({
           runId: "run-child-live",
           childSessionKey: "agent:main:subagent:child-live",
@@ -550,7 +543,6 @@ describe("listSessionsFromStore search", () => {
 
         const result = listSingleSession({
           cfg: createAnthropicContext1mConfig(),
-          storePath,
           key: "agent:main:subagent:child-live",
           entry: {
             sessionId: "sess-child",
@@ -583,7 +575,7 @@ describe("listSessionsFromStore search", () => {
       output: 500,
       cacheRead: 1_200,
       costTotal: 0.007725,
-      run: ({ storePath, now }) => {
+      run: ({ now }) => {
         addSubagentRunForTests({
           runId: "run-child-live-new-model",
           childSessionKey: "agent:main:subagent:child-live-stale-transcript",
@@ -602,7 +594,6 @@ describe("listSessionsFromStore search", () => {
 
         const result = listSingleSession({
           cfg: createAnthropicContext1mConfig(),
-          storePath,
           key: "agent:main:subagent:child-live-stale-transcript",
           entry: {
             sessionId: "sess-child-stale",
@@ -633,10 +624,9 @@ describe("listSessionsFromStore search", () => {
       output: 500,
       cacheRead: 1_200,
       costTotal: 0.007725,
-      run: ({ storePath, now }) => {
+      run: ({ now }) => {
         const result = listSingleSession({
           cfg: createAnthropicContext1mConfig(),
-          storePath,
           key: "agent:main:main",
           entry: {
             sessionId: "sess-override",
@@ -667,7 +657,7 @@ describe("listSessionsFromStore search", () => {
       output: 500,
       cacheRead: 1_200,
       costTotal: 0.007725,
-      run: ({ storePath, now }) => {
+      run: ({ now }) => {
         const result = listSingleSession({
           cfg: {
             session: { mainKey: "main" },
@@ -675,7 +665,6 @@ describe("listSessionsFromStore search", () => {
               list: [{ id: "main", default: true }],
             },
           } as unknown as OpenClawConfig,
-          storePath,
           key: "agent:main:main",
           entry: {
             sessionId: "sess-pricing",

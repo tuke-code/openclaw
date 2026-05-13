@@ -9,7 +9,7 @@ import {
 } from "./service.test-harness.js";
 
 const noopLogger = createNoopLogger();
-const { makeStorePath } = createCronStoreHarness();
+const { makeStoreKey } = createCronStoreHarness();
 installCronTestHooks({ logger: noopLogger });
 
 type CronAddInput = Parameters<CronService["add"]>[0];
@@ -87,8 +87,8 @@ function buildMainSessionSystemEventJob(name: string): CronAddInput {
 }
 
 function createIsolatedCronWithFinishedBarrier(params: {
-  storePath: string;
   status?: "ok" | "error";
+  storeKey?: string;
   delivered?: boolean;
   error?: string;
   onFinished?: (evt: {
@@ -104,7 +104,7 @@ function createIsolatedCronWithFinishedBarrier(params: {
 }) {
   const finished = createFinishedBarrier();
   const cron = new CronService({
-    storePath: params.storePath,
+    storeKey: params.storeKey,
     cronEnabled: true,
     log: noopLogger,
     enqueueSystemEvent: vi.fn(),
@@ -200,11 +200,11 @@ async function runIsolatedJobAndReadState(params: {
     };
   }) => void;
 }) {
-  const store = await makeStorePath();
   const finishedEvents = new Map<string, (evt: unknown) => void>();
+  const store = await makeStoreKey();
   const { cron, finished } = createIsolatedCronWithFinishedBarrier({
-    storePath: store.storePath,
     ...(params.status !== undefined ? { status: params.status } : {}),
+    storeKey: store.storeKey,
     ...(params.delivered !== undefined ? { delivered: params.delivered } : {}),
     ...(params.error !== undefined ? { error: params.error } : {}),
     onFinished: (evt) => {
@@ -424,9 +424,9 @@ describe("CronService persists delivered status", () => {
   });
 
   it("does not set lastDelivered for main session jobs", async () => {
-    const store = await makeStorePath();
+    const store = await makeStoreKey();
     const { cron, enqueueSystemEvent, finished } = createStartedCronServiceWithFinishedBarrier({
-      storePath: store.storePath,
+      storeKey: store.storeKey,
       logger: noopLogger,
     });
 

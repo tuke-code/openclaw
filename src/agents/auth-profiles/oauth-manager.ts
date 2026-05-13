@@ -1,14 +1,9 @@
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { normalizeSecretInputString } from "../../config/types.secrets.js";
 import { formatErrorMessage } from "../../infra/errors.js";
-import { withFileLock } from "../../infra/file-lock.js";
 import { redactSensitiveText } from "../../logging/redact.js";
-import {
-  AUTH_STORE_LOCK_OPTIONS,
-  OAUTH_REFRESH_CALL_TIMEOUT_MS,
-  OAUTH_REFRESH_LOCK_OPTIONS,
-  log,
-} from "./constants.js";
+import { withOpenClawStateLock } from "../../state/openclaw-state-lock.js";
+import { OAUTH_REFRESH_CALL_TIMEOUT_MS, OAUTH_REFRESH_LOCK_OPTIONS, log } from "./constants.js";
 import { shouldMirrorRefreshedOAuthCredential } from "./oauth-identity.js";
 import {
   buildRefreshContentionError,
@@ -27,7 +22,11 @@ import {
   shouldReplaceStoredOAuthCredential,
   type RuntimeExternalOAuthProfile,
 } from "./oauth-shared.js";
-import { ensureAuthStoreFile, resolveAuthStorePath, resolveOAuthRefreshLockPath } from "./paths.js";
+import {
+  OAUTH_REFRESH_LOCK_SCOPE,
+  resolveAuthProfileStoreKey,
+  resolveOAuthRefreshLockKey,
+} from "./paths.js";
 import {
   ensureAuthProfileStoreWithoutExternalProfiles,
   loadAuthProfileStoreWithoutExternalProfiles,
@@ -64,7 +63,6 @@ export class OAuthManagerRefreshError extends Error {
   readonly profileId: string;
   readonly provider: string;
   readonly code?: string;
-  readonly lockPath?: string;
   readonly #refreshedStore: AuthProfileStore;
   readonly #credential: OAuthCredential;
 
@@ -77,7 +75,7 @@ export class OAuthManagerRefreshError extends Error {
   }) {
     const structuredCause =
       typeof params.cause === "object" && params.cause !== null
-        ? (params.cause as { code?: unknown; lockPath?: unknown; cause?: unknown })
+        ? (params.cause as { code?: unknown; cause?: unknown })
         : undefined;
     const delegatedCause =
       structuredCause?.code === "refresh_contention" && structuredCause.cause
@@ -100,16 +98,6 @@ export class OAuthManagerRefreshError extends Error {
     this.#refreshedStore = params.refreshedStore;
     if (structuredCause) {
       this.code = typeof structuredCause.code === "string" ? structuredCause.code : undefined;
-      if (typeof structuredCause.lockPath === "string") {
-        this.lockPath = structuredCause.lockPath;
-      } else if (
-        typeof structuredCause.cause === "object" &&
-        structuredCause.cause !== null &&
-        "lockPath" in structuredCause.cause &&
-        typeof structuredCause.cause.lockPath === "string"
-      ) {
-        this.lockPath = structuredCause.cause.lockPath;
-      }
     }
   }
 
@@ -383,8 +371,6 @@ export function createOAuthManager(adapter: OAuthManagerAdapter) {
     refreshed: OAuthCredential;
   }): Promise<void> {
     try {
-      const mainPath = resolveAuthStorePath(undefined);
-      ensureAuthStoreFile(mainPath);
       await updateAuthProfileStoreWithLock({
         agentDir: undefined,
         updater: (store) => {
@@ -428,13 +414,17 @@ export function createOAuthManager(adapter: OAuthManagerAdapter) {
     attemptedCredentials?: OAuthCredential[];
   }): Promise<ResolvedOAuthAccess | null> {
     const ownerAgentDir = resolvePersistedAuthProfileOwnerAgentDir(params);
-    const authPath = resolveAuthStorePath(ownerAgentDir);
-    ensureAuthStoreFile(authPath);
-    const globalRefreshLockPath = resolveOAuthRefreshLockPath(params.provider, params.profileId);
+    const ownerStoreKey = resolveAuthProfileStoreKey(ownerAgentDir);
+    const refreshLockKey = resolveOAuthRefreshLockKey(params.provider, params.profileId);
 
     try {
-      return await withFileLock(globalRefreshLockPath, OAUTH_REFRESH_LOCK_OPTIONS, async () =>
-        withFileLock(authPath, AUTH_STORE_LOCK_OPTIONS, async () => {
+      return await withOpenClawStateLock(
+        refreshLockKey,
+        {
+          scope: OAUTH_REFRESH_LOCK_SCOPE,
+          ...OAUTH_REFRESH_LOCK_OPTIONS,
+        },
+        async () => {
           const store = loadStoredOAuthRefreshStore(ownerAgentDir);
           const cred = store.profiles[params.profileId];
           if (!cred || cred.type !== "oauth") {
@@ -558,8 +548,8 @@ export function createOAuthManager(adapter: OAuthManagerAdapter) {
           store.profiles[params.profileId] = refreshedCredentials;
           saveAuthProfileStore(store, ownerAgentDir);
           if (ownerAgentDir) {
-            const mainPath = resolveAuthStorePath(undefined);
-            if (mainPath !== authPath) {
+            const mainStoreKey = resolveAuthProfileStoreKey(undefined);
+            if (mainStoreKey !== ownerStoreKey) {
               await mirrorRefreshedCredentialIntoMainStore({
                 profileId: params.profileId,
                 refreshed: refreshedCredentials,
@@ -573,10 +563,10 @@ export function createOAuthManager(adapter: OAuthManagerAdapter) {
             }),
             credential: refreshedCredentials,
           };
-        }),
+        },
       );
     } catch (error) {
-      if (isGlobalRefreshLockTimeoutError(error, globalRefreshLockPath)) {
+      if (isGlobalRefreshLockTimeoutError(error, OAUTH_REFRESH_LOCK_SCOPE, refreshLockKey)) {
         throw buildRefreshContentionError({
           provider: params.provider,
           profileId: params.profileId,

@@ -1,4 +1,4 @@
-import type { AgentToolResult } from "@earendil-works/pi-agent-core";
+import type { AgentToolResult } from "../../agents/agent-core-contract.js";
 import type { ReplyPayload } from "../../auto-reply/reply-payload.js";
 import type { InboundEventKind } from "../../channels/inbound-event/kind.js";
 import { dispatchChannelMessageAction } from "../../channels/plugins/message-action-dispatch.js";
@@ -59,7 +59,7 @@ export type OutboundSendContext = {
 type PluginHandledResult = {
   handledBy: "plugin";
   payload: unknown;
-  toolResult: AgentToolResult<unknown>;
+  toolResult: AgentToolResult;
 };
 
 type SendMessageParams = Parameters<typeof sendMessage>[0];
@@ -250,7 +250,7 @@ export async function executeSendAction(params: {
 }): Promise<{
   handledBy: "plugin" | "core";
   payload: unknown;
-  toolResult?: AgentToolResult<unknown>;
+  toolResult?: AgentToolResult;
   sendResult?: MessageSendResult;
 }> {
   throwIfAborted(params.ctx.abortSignal);
@@ -337,7 +337,7 @@ export async function executePollAction(params: {
 }): Promise<{
   handledBy: "plugin" | "core";
   payload: unknown;
-  toolResult?: AgentToolResult<unknown>;
+  toolResult?: AgentToolResult;
   pollResult?: MessagePollResult;
 }> {
   const pluginHandled = await tryHandleWithPluginAction({

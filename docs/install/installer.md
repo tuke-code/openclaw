@@ -71,7 +71,7 @@ Recommended for most interactive installs on macOS/Linux/WSL.
     Supports macOS and Linux (including WSL). If macOS is detected, installs Homebrew if missing.
   </Step>
   <Step title="Ensure Node.js 24 by default">
-    Checks Node version and installs Node 24 if needed (Homebrew on macOS, NodeSource setup scripts on Linux apt/dnf/yum). OpenClaw still supports Node 22 LTS, currently `22.19+`, for compatibility.
+    Checks Node version and installs Node 24 if needed (Homebrew on macOS, NodeSource setup scripts on Linux apt/dnf/yum).
   </Step>
   <Step title="Ensure Git">
     Installs Git if missing.
@@ -245,7 +245,7 @@ by default, plus git-checkout installs under the same prefix flow.
 | `--git`, `--github`         | Shortcut for git method                                                         |
 | `--git-dir <path>`          | Git checkout directory (default: `~/openclaw`). Alias: `--dir`                  |
 | `--version <ver>`           | OpenClaw version or dist-tag (default: `latest`)                                |
-| `--node-version <ver>`      | Node version (default: `22.22.0`)                                               |
+| `--node-version <ver>`      | Node version (default: `24.12.0`)                                               |
 | `--json`                    | Emit NDJSON events                                                              |
 | `--onboard`                 | Run `openclaw onboard` after install                                            |
 | `--no-onboard`              | Skip onboarding (default)                                                       |

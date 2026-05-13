@@ -1,4 +1,3 @@
-import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import {
   isSilentReplyPayloadText,
   isSilentReplyText,
@@ -6,7 +5,7 @@ import {
 } from "../../../auto-reply/tokens.js";
 import type { EmbeddedPiExecutionContract } from "../../../config/types.agent-defaults.js";
 import { normalizeLowercaseStringOrEmpty } from "../../../shared/string-coerce.js";
-import { hasAcceptedSessionSpawn } from "../../accepted-session-spawn.js";
+import type { AgentMessage } from "../../agent-core-contract.js";
 import { collectTextContentBlocks } from "../../content-blocks.js";
 import {
   isStrictAgenticSupportedProviderModel,
@@ -30,7 +29,7 @@ type ReplayMetadataAttempt = Pick<
   | "messagingToolSentMediaUrls"
   | "successfulCronAdds"
 > &
-  Partial<Pick<EmbeddedRunAttemptResult, "messagingToolSentTargets" | "acceptedSessionSpawns">>;
+  Partial<Pick<EmbeddedRunAttemptResult, "messagingToolSentTargets">>;
 
 type IncompleteTurnAttempt = Pick<
   EmbeddedRunAttemptResult,
@@ -48,8 +47,7 @@ type IncompleteTurnAttempt = Pick<
   | "replayMetadata"
   | "promptErrorSource"
   | "timedOutDuringCompaction"
-> &
-  Partial<Pick<EmbeddedRunAttemptResult, "acceptedSessionSpawns">>;
+>;
 
 type PlanningOnlyAttempt = Pick<
   EmbeddedRunAttemptResult,
@@ -208,7 +206,6 @@ export function buildAttemptReplayMetadata(
   const hadPotentialSideEffects =
     hadMutatingTools ||
     hasMessagingToolDeliveryEvidence(params) ||
-    hasAcceptedSessionSpawn(params.acceptedSessionSpawns) ||
     (params.successfulCronAdds ?? 0) > 0;
   return {
     hadPotentialSideEffects,
@@ -252,10 +249,6 @@ export function resolveIncompleteTurnPayloadText(params: {
   }
 
   if (hasCommittedMessagingToolDeliveryEvidence(params.attempt)) {
-    return null;
-  }
-
-  if (hasAcceptedSessionSpawn(params.attempt.acceptedSessionSpawns)) {
     return null;
   }
 
@@ -491,7 +484,6 @@ function shouldSkipPlanningOnlyRetry(params: {
     params.attempt.yieldDetected ||
     params.attempt.didSendDeterministicApprovalPrompt ||
     params.attempt.lastToolError ||
-    hasAcceptedSessionSpawn(params.attempt.acceptedSessionSpawns) ||
     resolveAttemptReplayMetadata(params.attempt).hadPotentialSideEffects,
   );
 }

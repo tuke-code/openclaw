@@ -6,7 +6,6 @@ import {
   AcpxRuntime as BaseAcpxRuntime,
   createAcpRuntime,
   createAgentRegistry,
-  createFileSessionStore,
   decodeAcpxRuntimeHandleState,
   encodeAcpxRuntimeHandleState,
   type AcpAgentRegistry,
@@ -18,6 +17,7 @@ import {
   type AcpRuntimeTurn,
   type AcpRuntimeTurnResult,
 } from "acpx/runtime";
+import { createPluginBlobStore } from "openclaw/plugin-sdk/plugin-state-runtime";
 import { redactSensitiveText } from "openclaw/plugin-sdk/security-runtime";
 import { AcpRuntimeError, type AcpRuntime, type AcpRuntimeErrorCode } from "../runtime-api.js";
 import {
@@ -52,14 +52,22 @@ type ResetAwareSessionStore = AcpSessionStore & {
   markFresh: (sessionKey: string) => void;
 };
 
-function withOpenClawManagedTurnTimeout<T extends object>(input: T): T & { timeoutMs: 0 } {
-  // OpenClaw owns ACP turn deadlines. acpx treats timeout after partial agent
-  // output as a completed turn, which can mark background work done early.
-  return {
-    ...input,
-    timeoutMs: 0,
-  };
-}
+const ACPX_SESSION_STORE_PLUGIN_ID = "acpx";
+const ACPX_SESSION_STORE_NAMESPACE = "runtime-sessions";
+const ACPX_SESSION_STORE_MAX_ENTRIES = 10_000;
+
+type StoredAcpSessionRecordMetadata = {
+  schemaVersion: 1;
+  bytes: number;
+};
+
+const acpxSessionStore = createPluginBlobStore<StoredAcpSessionRecordMetadata>(
+  ACPX_SESSION_STORE_PLUGIN_ID,
+  {
+    namespace: ACPX_SESSION_STORE_NAMESPACE,
+    maxEntries: ACPX_SESSION_STORE_MAX_ENTRIES,
+  },
+);
 
 type AcpxLaunchLeaseContext = {
   leaseId: string;
@@ -121,6 +129,65 @@ function readSessionRecordName(record: unknown): string {
   }
   const { name } = record as { name?: unknown };
   return typeof name === "string" ? name.trim() : "";
+}
+
+function resolveAcpSessionRecordKey(record: unknown): string {
+  if (typeof record !== "object" || record === null) {
+    return "";
+  }
+  const fields = record as {
+    acpxRecordId?: unknown;
+    name?: unknown;
+    sessionKey?: unknown;
+    id?: unknown;
+    sessionId?: unknown;
+  };
+  for (const value of [
+    fields.acpxRecordId,
+    fields.name,
+    fields.sessionKey,
+    fields.id,
+    fields.sessionId,
+  ]) {
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+  return "";
+}
+
+function normalizeAcpSessionStoreKey(sessionId: string): string {
+  return sessionId.trim();
+}
+
+function parseStoredAcpSessionRecord(blob: Buffer): AcpLoadedSessionRecord {
+  const parsed = JSON.parse(blob.toString("utf8")) as unknown;
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return undefined;
+  }
+  return parsed as AcpLoadedSessionRecord;
+}
+
+export function createSqliteSessionStore(): AcpSessionStore {
+  return {
+    async load(sessionId: string): Promise<AcpLoadedSessionRecord> {
+      const key = normalizeAcpSessionStoreKey(sessionId);
+      const entry = key ? await acpxSessionStore.lookup(key) : undefined;
+      return entry ? parseStoredAcpSessionRecord(entry.blob) : undefined;
+    },
+    async save(record: AcpSessionRecord): Promise<void> {
+      const key = resolveAcpSessionRecordKey(record);
+      if (!key) {
+        throw new Error("Cannot save ACPX session without a stable session key.");
+      }
+      const payload = Buffer.from(JSON.stringify(record), "utf8");
+      await acpxSessionStore.register(
+        key,
+        { schemaVersion: 1, bytes: payload.byteLength },
+        payload,
+      );
+    },
+  };
 }
 
 function readRecordAgentCommand(record: unknown): string | undefined {
@@ -952,7 +1019,7 @@ export class AcpxRuntime implements AcpRuntime {
     const command = await this.resolveCommandForHandle(input.handle);
     const delegate = await this.resolveDelegateForHandle(input.handle);
     try {
-      for await (const event of delegate.runTurn(withOpenClawManagedTurnTimeout(input))) {
+      for await (const event of delegate.runTurn(input)) {
         if (
           event.type !== "error" ||
           !isCodexAcpCommand(command) ||
@@ -998,7 +1065,7 @@ export class AcpxRuntime implements AcpRuntime {
       try {
         return {
           command,
-          turn: delegate.startTurn(withOpenClawManagedTurnTimeout(input)),
+          turn: delegate.startTurn(input),
         };
       } catch (error) {
         if (!isCodexAcpCommand(command) || !isGenericInternalAcpError(error)) {
@@ -1197,7 +1264,6 @@ export {
   ACPX_BACKEND_ID,
   createAcpRuntime,
   createAgentRegistry,
-  createFileSessionStore,
   decodeAcpxRuntimeHandleState,
   encodeAcpxRuntimeHandleState,
 };

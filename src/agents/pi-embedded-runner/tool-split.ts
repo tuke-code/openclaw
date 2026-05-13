@@ -1,4 +1,4 @@
-import type { AgentTool } from "@earendil-works/pi-agent-core";
+import type { AgentTool } from "../agent-core-contract.js";
 import { toToolDefinitions } from "../pi-tool-definition-adapter.js";
 import type { HookContext } from "../pi-tools.before-tool-call.js";
 

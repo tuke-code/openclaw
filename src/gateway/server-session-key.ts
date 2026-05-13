@@ -9,8 +9,8 @@ import {
   toAgentRequestSessionKey,
 } from "../routing/session-key.js";
 import { resolvePreferredSessionKeyForSessionIdMatches } from "../sessions/session-id-resolution.js";
-import { resolveSessionStoreAgentId, resolveSessionStoreKey } from "./session-store-key.js";
-import { loadCombinedSessionStoreForGateway } from "./session-utils.js";
+import { resolveSessionRowAgentId, resolveSessionRowKey } from "./session-row-key.js";
+import { loadCombinedSessionEntriesForGateway } from "./session-utils.js";
 
 const RUN_LOOKUP_CACHE_LIMIT = 256;
 const RUN_LOOKUP_MISS_TTL_MS = 1_000;
@@ -54,13 +54,12 @@ function sessionKeyMatchesAgent(sessionKey: string, agentId: string, cfg: OpenCl
   if (cfg.session?.scope === "global" && sessionKey.trim().toLowerCase() === "global") {
     return true;
   }
-  const normalizedAgentId = normalizeAgentId(agentId);
   const parsed = parseAgentSessionKey(sessionKey);
   if (!parsed && sessionKey.trim().toLowerCase().startsWith("agent:")) {
     return false;
   }
-  const canonicalKey = resolveSessionStoreKey({ cfg, sessionKey, storeAgentId: agentId });
-  return resolveSessionStoreAgentId(cfg, canonicalKey) === normalizedAgentId;
+  const canonicalKey = resolveSessionRowKey({ cfg, sessionKey });
+  return resolveSessionRowAgentId(cfg, canonicalKey) === normalizeAgentId(agentId);
 }
 
 function resolveRunSessionKeyForCaller(storeKey: string) {
@@ -95,7 +94,9 @@ export function resolveSessionKeyForRun(runId: string, opts: { agentId?: string 
     }
     resolvedSessionKeyByRunId.delete(cacheKey);
   }
-  const { store } = loadCombinedSessionStoreForGateway(cfg, { agentId: requestedAgentId });
+  const { entries: store } = loadCombinedSessionEntriesForGateway(cfg, {
+    agentId: requestedAgentId,
+  });
   const matches = Object.entries(store).filter(
     (entry): entry is [string, SessionEntry] =>
       entry[1]?.sessionId === runId && sessionKeyMatchesAgent(entry[0], requestedAgentId, cfg),

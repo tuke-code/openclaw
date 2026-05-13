@@ -9,7 +9,7 @@ import {
 } from "./service.test-harness.js";
 
 const noopLogger = createNoopLogger();
-const { makeStorePath } = createCronStoreHarness();
+const { makeStoreKey } = createCronStoreHarness();
 installCronTestHooks({ logger: noopLogger });
 
 function expectCronRunSessionKey(value: unknown, jobId: string) {
@@ -28,9 +28,10 @@ describe("CronService interval/cron jobs fire on time", () => {
     jobId: string;
     firstDueAt: number;
   }) => {
+    const finishedPromise = finished.waitForOk(jobId);
     vi.setSystemTime(new Date(firstDueAt + 5));
     await vi.runOnlyPendingTimersAsync();
-    await finished.waitForOk(jobId);
+    await finishedPromise;
     const jobs = await cron.list({ includeDisabled: true });
     return jobs.find((current) => current.id === jobId);
   };
@@ -65,9 +66,9 @@ describe("CronService interval/cron jobs fire on time", () => {
   };
 
   it("fires an every-type main job when the timer fires a few ms late", async () => {
-    const store = await makeStorePath();
+    const store = await makeStoreKey();
     const { cron, enqueueSystemEvent, finished } = createStartedCronServiceWithFinishedBarrier({
-      storePath: store.storePath,
+      storeKey: store.storeKey,
       logger: noopLogger,
     });
 
@@ -100,9 +101,9 @@ describe("CronService interval/cron jobs fire on time", () => {
   });
 
   it("fires a cron-expression job when the timer fires a few ms late", async () => {
-    const store = await makeStorePath();
+    const store = await makeStoreKey();
     const { cron, enqueueSystemEvent, finished } = createStartedCronServiceWithFinishedBarrier({
-      storePath: store.storePath,
+      storeKey: store.storeKey,
       logger: noopLogger,
     });
 
@@ -137,13 +138,13 @@ describe("CronService interval/cron jobs fire on time", () => {
   });
 
   it("keeps legacy every jobs due while minute cron jobs recompute schedules", async () => {
-    const store = await makeStorePath();
+    const store = await makeStoreKey();
     const enqueueSystemEvent = vi.fn();
     const requestHeartbeat = vi.fn();
     const nowMs = Date.parse("2025-12-13T00:00:00.000Z");
 
     await writeCronStoreSnapshot({
-      storePath: store.storePath,
+      storeKey: store.storeKey,
       jobs: [
         {
           id: "legacy-every",
@@ -173,7 +174,7 @@ describe("CronService interval/cron jobs fire on time", () => {
     });
 
     const cron = new CronService({
-      storePath: store.storePath,
+      storeKey: store.storeKey,
       cronEnabled: true,
       log: noopLogger,
       enqueueSystemEvent,

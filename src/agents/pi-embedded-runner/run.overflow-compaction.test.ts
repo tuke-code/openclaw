@@ -226,7 +226,6 @@ describe("runEmbeddedPiAgent overflow compaction trigger routing", () => {
     await runEmbeddedPiAgent({
       sessionId: "test-session",
       sessionKey: "test-key",
-      sessionFile: "/tmp/session.json",
       workspaceDir: "/tmp/workspace",
       prompt: "hello",
       timeoutMs: 30000,
@@ -1245,10 +1244,7 @@ describe("runEmbeddedPiAgent overflow compaction trigger routing", () => {
         forwardedAuthProfileId: "openai:personal",
       },
     });
-    const harnessParams = mockCallArg(pluginRunAttempt) as {
-      runtimePlan?: unknown;
-      authProfileStore?: { profiles?: Record<string, unknown> };
-    };
+    const harnessParams = pluginRunAttempt.mock.calls[0]?.[0];
     expect(harnessParams?.runtimePlan).toBe(runtimePlan);
     const authProfileStore = expectRecordFields(harnessParams.authProfileStore, {});
     const authProfiles = expectRecordFields(authProfileStore.profiles, {});
@@ -1391,7 +1387,6 @@ describe("runEmbeddedPiAgent overflow compaction trigger routing", () => {
     expect(Object.keys(firstAuthProfiles)).toEqual(["openai-codex:sub", "openai:backup"]);
     expect(secondAttempt.authProfileStore).toBe(firstAttempt.authProfileStore);
   });
-
   it("blocks undersized models before dispatching a provider attempt", async () => {
     mockedResolveContextWindowInfo.mockReturnValue({
       tokens: 800,
@@ -1427,14 +1422,16 @@ describe("runEmbeddedPiAgent overflow compaction trigger routing", () => {
     await runEmbeddedPiAgent(overflowBaseRunParams);
 
     expect(mockedCompactDirect).toHaveBeenCalledTimes(1);
-    const compactParams = expectMockCallFields(mockedCompactDirect, {
-      sessionId: "test-session",
-      sessionFile: "/tmp/session.json",
-    });
-    expectRecordFields(compactParams.runtimeContext, {
-      trigger: "overflow",
-      authProfileId: "test-profile",
-    });
+    expect(mockedCompactDirect).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "test-session",
+        transcriptScope: { agentId: "main", sessionId: "test-session" },
+        runtimeContext: expect.objectContaining({
+          trigger: "overflow",
+          authProfileId: "test-profile",
+        }),
+      }),
+    );
   });
 
   it("threads prompt-cache runtime context into overflow compaction", async () => {
@@ -1575,22 +1572,22 @@ describe("runEmbeddedPiAgent overflow compaction trigger routing", () => {
 
     await runEmbeddedPiAgent(overflowBaseRunParams);
 
-    expectRecordFields(mockCallArg(mockedGlobalHookRunner.runBeforeCompaction), {
-      messageCount: -1,
-      sessionFile: "/tmp/session.json",
-    });
-    expectRecordFields(mockCallArg(mockedGlobalHookRunner.runBeforeCompaction, 0, 1), {
-      sessionKey: "test-key",
-    });
-    expectRecordFields(mockCallArg(mockedGlobalHookRunner.runAfterCompaction), {
-      messageCount: -1,
-      compactedCount: -1,
-      tokenCount: 50,
-      sessionFile: "/tmp/session.json",
-    });
-    expectRecordFields(mockCallArg(mockedGlobalHookRunner.runAfterCompaction, 0, 1), {
-      sessionKey: "test-key",
-    });
+    expect(mockedGlobalHookRunner.runBeforeCompaction).toHaveBeenCalledWith(
+      { messageCount: -1 },
+      expect.objectContaining({
+        sessionKey: "test-key",
+      }),
+    );
+    expect(mockedGlobalHookRunner.runAfterCompaction).toHaveBeenCalledWith(
+      {
+        messageCount: -1,
+        compactedCount: -1,
+        tokenCount: 50,
+      },
+      expect.objectContaining({
+        sessionKey: "test-key",
+      }),
+    );
   });
 
   it("runs maintenance after successful overflow-recovery compaction", async () => {
@@ -1609,17 +1606,19 @@ describe("runEmbeddedPiAgent overflow compaction trigger routing", () => {
 
     await runEmbeddedPiAgent(overflowBaseRunParams);
 
-    const maintenanceParams = expectMockCallFields(mockedRunContextEngineMaintenance, {
-      contextEngine: mockedContextEngine,
-      sessionId: "test-session",
-      sessionKey: "test-key",
-      sessionFile: "/tmp/session.json",
-      reason: "compaction",
-    });
-    expectRecordFields(maintenanceParams.runtimeContext, {
-      trigger: "overflow",
-      authProfileId: "test-profile",
-    });
+    expect(mockedRunContextEngineMaintenance).toHaveBeenCalledWith(
+      expect.objectContaining({
+        contextEngine: mockedContextEngine,
+        sessionId: "test-session",
+        sessionKey: "test-key",
+        transcriptScope: { agentId: "main", sessionId: "test-session" },
+        reason: "compaction",
+        runtimeContext: expect.objectContaining({
+          trigger: "overflow",
+          authProfileId: "test-profile",
+        }),
+      }),
+    );
   });
 
   it("retries overflow recovery against the rotated compacted transcript", async () => {
@@ -1629,7 +1628,6 @@ describe("runEmbeddedPiAgent overflow compaction trigger routing", () => {
         makeAttemptResult({
           promptError: null,
           sessionIdUsed: "rotated-session",
-          sessionFileUsed: "/tmp/rotated-session.json",
         }),
       );
     mockedCompactDirect.mockResolvedValueOnce(
@@ -1637,7 +1635,6 @@ describe("runEmbeddedPiAgent overflow compaction trigger routing", () => {
         summary: "rotated overflow compaction",
         tokensAfter: 50,
         sessionId: "rotated-session",
-        sessionFile: "/tmp/rotated-session.json",
       }),
     );
 
@@ -1647,14 +1644,15 @@ describe("runEmbeddedPiAgent overflow compaction trigger routing", () => {
       mockedRunEmbeddedAttempt,
       {
         sessionId: "rotated-session",
-        sessionFile: "/tmp/rotated-session.json",
       },
       1,
     );
-    expectMockCallFields(mockedRunContextEngineMaintenance, {
-      sessionId: "rotated-session",
-      sessionFile: "/tmp/rotated-session.json",
-    });
+    expect(mockedRunContextEngineMaintenance).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "rotated-session",
+        transcriptScope: { agentId: "main", sessionId: "rotated-session" },
+      }),
+    );
   });
 
   it("guards thrown engine-owned overflow compaction attempts", async () => {

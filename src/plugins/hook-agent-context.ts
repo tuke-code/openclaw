@@ -1,3 +1,5 @@
+import { readSqliteSessionRoutingInfo } from "../config/sessions/session-entries.sqlite.js";
+import { resolveAgentIdFromSessionKey } from "../routing/session-key.js";
 import { parseRawSessionConversationRef } from "../sessions/session-key-utils.js";
 import { normalizeOptionalString } from "../shared/string-coerce.js";
 import type { PluginHookAgentContext } from "./hook-types.js";
@@ -36,6 +38,19 @@ function stripConversationPrefix(
   return text;
 }
 
+function readHookSessionConversationPeerId(sessionKey: string | null | undefined) {
+  const normalized = normalizeOptionalString(sessionKey);
+  if (!normalized) {
+    return undefined;
+  }
+  try {
+    const agentId = resolveAgentIdFromSessionKey(normalized);
+    return readSqliteSessionRoutingInfo({ agentId, sessionKey: normalized })?.conversationPeerId;
+  } catch {
+    return undefined;
+  }
+}
+
 export function resolveAgentHookChannelId(params: {
   sessionKey?: string | null;
   messageChannel?: string | null;
@@ -48,6 +63,13 @@ export function resolveAgentHookChannelId(params: {
   const parsed = parseRawSessionConversationRef(params.sessionKey);
   if (parsed?.rawId) {
     return parsed.rawId;
+  }
+  const typedConversationPeerId = readHookSessionConversationPeerId(params.sessionKey);
+  if (typedConversationPeerId) {
+    return (
+      stripConversationPrefix(typedConversationPeerId, provider, messageChannel) ??
+      typedConversationPeerId
+    );
   }
 
   const metadataChannel =

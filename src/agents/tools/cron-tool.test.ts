@@ -240,7 +240,7 @@ describe("cron tool", () => {
   it("allows scoped isolated cron runs to read cron scheduler status", async () => {
     callGatewayMock.mockResolvedValueOnce({
       enabled: true,
-      storePath: "/home/user/.openclaw/cron/jobs.json",
+      storeKey: "default",
       jobs: 37,
       nextWakeAtMs: 1_234,
     });
@@ -759,6 +759,33 @@ describe("cron tool", () => {
       to: "room:!AbCdEf1234567890:example.org",
       accountId: "bot-a",
       threadId: "$RootEvent:Example.Org",
+    });
+  });
+
+  it("preserves telegram dm thread ids when inferring delivery", async () => {
+    expect(
+      await executeAddAndReadDelivery({
+        callId: "call-telegram-dm-thread",
+        agentSessionKey: "agent:main:telegram:dm:123456789:thread:123456789:99",
+      }),
+    ).toEqual({
+      mode: "announce",
+      channel: "telegram",
+      to: "123456789",
+      threadId: "99",
+    });
+  });
+
+  it("drops mismatched telegram direct-chat thread ids when inferring delivery", async () => {
+    expect(
+      await executeAddAndReadDelivery({
+        callId: "call-telegram-mismatched-direct-thread",
+        agentSessionKey: "agent:main:telegram:direct:123456789:thread:987654321:99",
+      }),
+    ).toEqual({
+      mode: "announce",
+      channel: "telegram",
+      to: "123456789",
     });
   });
 

@@ -1,20 +1,16 @@
-import fsp from "node:fs/promises";
-import path from "node:path";
-import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import { migrateSessionEntries, parseSessionEntries } from "@earendil-works/pi-coding-agent";
 import {
-  resolveSessionFilePath,
-  resolveSessionFilePathOptions,
-} from "../../config/sessions/paths.js";
+  loadSqliteSessionTranscriptEvents,
+  resolveSqliteSessionTranscriptScope,
+} from "../../config/sessions/transcript-store.sqlite.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
-import { isPathInside } from "../../infra/path-guards.js";
 import { resolveSessionAgentIds } from "../agent-scope.js";
 import {
   limitAgentHookHistoryMessages,
   MAX_AGENT_HOOK_HISTORY_MESSAGES,
 } from "../harness/hook-history.js";
+import { type TranscriptEntry } from "../transcript/session-transcript-contract.js";
 
-export const MAX_CLI_SESSION_HISTORY_FILE_BYTES = 5 * 1024 * 1024;
+export const MAX_CLI_SESSION_HISTORY_BYTES = 5 * 1024 * 1024;
 export const MAX_CLI_SESSION_HISTORY_MESSAGES = MAX_AGENT_HOOK_HISTORY_MESSAGES;
 export const MAX_CLI_SESSION_RESEED_HISTORY_CHARS = 12 * 1024;
 
@@ -27,15 +23,6 @@ type HistoryEntry = {
   type?: unknown;
   message?: unknown;
   summary?: unknown;
-  customType?: unknown;
-  content?: unknown;
-  display?: unknown;
-  details?: unknown;
-  timestamp?: unknown;
-  fromId?: unknown;
-  firstKeptEntryId?: unknown;
-  tokensBefore?: unknown;
-  tokensAfter?: unknown;
 };
 
 type RawTranscriptReseedReason =
@@ -70,48 +57,6 @@ function coerceHistoryText(content: unknown): string {
     })
     .join("\n")
     .trim();
-}
-
-function coerceHistoryTimestamp(value: unknown): number | string {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return value;
-  }
-  if (typeof value === "string") {
-    return value;
-  }
-  return 0;
-}
-
-function historyEntryToContextEngineMessage(entry: HistoryEntry): AgentMessage | undefined {
-  if (entry.type === "message") {
-    return entry.message as AgentMessage;
-  }
-  if (entry.type === "custom_message") {
-    return {
-      role: "custom",
-      customType: typeof entry.customType === "string" ? entry.customType : "custom",
-      content: entry.content,
-      display: entry.display !== false,
-      details: entry.details,
-      timestamp: coerceHistoryTimestamp(entry.timestamp),
-    } as AgentMessage;
-  }
-  if (entry.type === "branch_summary") {
-    return {
-      role: "branchSummary",
-      summary: typeof entry.summary === "string" ? entry.summary : "",
-      fromId: typeof entry.fromId === "string" ? entry.fromId : "root",
-      timestamp: coerceHistoryTimestamp(entry.timestamp),
-    } as AgentMessage;
-  }
-  return undefined;
-}
-
-function loadContextEngineMessagesFromEntries(entries: unknown[]): AgentMessage[] {
-  return entries.flatMap((entry) => {
-    const message = historyEntryToContextEngineMessage(entry as HistoryEntry);
-    return message ? [message] : [];
-  });
 }
 
 export function buildCliSessionHistoryPrompt(params: {
@@ -168,107 +113,48 @@ export function buildCliSessionHistoryPrompt(params: {
   ].join("\n");
 }
 
-async function safeRealpath(filePath: string): Promise<string | undefined> {
-  try {
-    return await fsp.realpath(filePath);
-  } catch {
-    return undefined;
-  }
-}
-
-function resolveSafeCliSessionFile(params: {
+function resolveSafeCliTranscriptScope(params: {
   sessionId: string;
-  sessionFile: string;
   sessionKey?: string;
   agentId?: string;
   config?: OpenClawConfig;
-}): { sessionFile: string; sessionsDir: string } {
+}): { agentId: string; sessionId: string } {
   const { defaultAgentId, sessionAgentId } = resolveSessionAgentIds({
     sessionKey: params.sessionKey,
     config: params.config,
     agentId: params.agentId,
   });
-  const pathOptions = resolveSessionFilePathOptions({
-    agentId: sessionAgentId ?? defaultAgentId,
-    storePath: params.config?.session?.store,
-  });
-  const sessionFile = resolveSessionFilePath(
-    params.sessionId,
-    { sessionFile: params.sessionFile },
-    pathOptions,
-  );
   return {
-    sessionFile,
-    sessionsDir: pathOptions?.sessionsDir ?? path.dirname(sessionFile),
+    agentId: sessionAgentId ?? defaultAgentId,
+    sessionId: params.sessionId,
   };
 }
 
 async function loadCliSessionEntries(params: {
   sessionId: string;
-  sessionFile: string;
   sessionKey?: string;
   agentId?: string;
   config?: OpenClawConfig;
 }): Promise<unknown[]> {
   try {
-    const { sessionFile, sessionsDir } = resolveSafeCliSessionFile(params);
-    const entryStat = await fsp.lstat(sessionFile);
-    if (!entryStat.isFile() || entryStat.isSymbolicLink()) {
+    const scope = resolveSqliteSessionTranscriptScope(resolveSafeCliTranscriptScope(params));
+    if (!scope) {
       return [];
     }
-    const realSessionsDir = (await safeRealpath(sessionsDir)) ?? path.resolve(sessionsDir);
-    const realSessionFile = await safeRealpath(sessionFile);
-    if (
-      !realSessionFile ||
-      realSessionFile === realSessionsDir ||
-      !isPathInside(realSessionsDir, realSessionFile)
-    ) {
+    const entries = loadSqliteSessionTranscriptEvents(scope)
+      .map((entry) => entry.event)
+      .filter((entry): entry is TranscriptEntry => Boolean(entry && typeof entry === "object"));
+    if (JSON.stringify(entries).length > MAX_CLI_SESSION_HISTORY_BYTES) {
       return [];
     }
-    const stat = await fsp.stat(realSessionFile);
-    if (!stat.isFile() || stat.size > MAX_CLI_SESSION_HISTORY_FILE_BYTES) {
-      return [];
-    }
-    const entries = parseSessionEntries(await fsp.readFile(realSessionFile, "utf-8"));
-    migrateSessionEntries(entries);
     return entries.filter((entry) => entry.type !== "session");
   } catch {
     return [];
   }
 }
 
-export async function hasCliSessionTranscript(params: {
-  sessionId: string;
-  sessionFile: string;
-  sessionKey?: string;
-  agentId?: string;
-  config?: OpenClawConfig;
-}): Promise<boolean> {
-  try {
-    const { sessionFile, sessionsDir } = resolveSafeCliSessionFile(params);
-    const entryStat = await fsp.lstat(sessionFile);
-    if (!entryStat.isFile() || entryStat.isSymbolicLink()) {
-      return false;
-    }
-    const realSessionsDir = (await safeRealpath(sessionsDir)) ?? path.resolve(sessionsDir);
-    const realSessionFile = await safeRealpath(sessionFile);
-    if (
-      !realSessionFile ||
-      realSessionFile === realSessionsDir ||
-      !isPathInside(realSessionsDir, realSessionFile)
-    ) {
-      return false;
-    }
-    const stat = await fsp.stat(realSessionFile);
-    return stat.isFile() && stat.size <= MAX_CLI_SESSION_HISTORY_FILE_BYTES;
-  } catch {
-    return false;
-  }
-}
-
 export async function loadCliSessionHistoryMessages(params: {
   sessionId: string;
-  sessionFile: string;
   sessionKey?: string;
   agentId?: string;
   config?: OpenClawConfig;
@@ -280,52 +166,8 @@ export async function loadCliSessionHistoryMessages(params: {
   return limitAgentHookHistoryMessages(history, MAX_CLI_SESSION_HISTORY_MESSAGES);
 }
 
-export async function loadCliSessionContextEngineMessages(params: {
-  sessionId: string;
-  sessionFile: string;
-  sessionKey?: string;
-  agentId?: string;
-  config?: OpenClawConfig;
-}): Promise<unknown[]> {
-  const entries = await loadCliSessionEntries(params);
-  const latestCompactionIndex = entries.findLastIndex((entry) => {
-    const candidate = entry as HistoryEntry;
-    return candidate.type === "compaction" && typeof candidate.summary === "string";
-  });
-  if (latestCompactionIndex < 0) {
-    return loadContextEngineMessagesFromEntries(entries);
-  }
-
-  const compaction = entries[latestCompactionIndex] as HistoryEntry;
-  const summary = typeof compaction.summary === "string" ? compaction.summary.trim() : "";
-  if (!summary) {
-    return loadContextEngineMessagesFromEntries(entries);
-  }
-
-  const tailMessages = loadContextEngineMessagesFromEntries(
-    entries.slice(latestCompactionIndex + 1),
-  );
-  return [
-    {
-      role: "compactionSummary",
-      summary,
-      timestamp: coerceHistoryTimestamp(compaction.timestamp),
-      tokensBefore: typeof compaction.tokensBefore === "number" ? compaction.tokensBefore : 0,
-      ...(typeof compaction.tokensAfter === "number"
-        ? { tokensAfter: compaction.tokensAfter }
-        : {}),
-      ...(typeof compaction.firstKeptEntryId === "string"
-        ? { firstKeptEntryId: compaction.firstKeptEntryId }
-        : {}),
-      ...(compaction.details !== undefined ? { details: compaction.details } : {}),
-    },
-    ...tailMessages,
-  ];
-}
-
 export async function loadCliSessionReseedMessages(params: {
   sessionId: string;
-  sessionFile: string;
   sessionKey?: string;
   agentId?: string;
   config?: OpenClawConfig;

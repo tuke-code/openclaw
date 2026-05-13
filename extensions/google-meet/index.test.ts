@@ -118,6 +118,50 @@ function setup(
   return harness;
 }
 
+function createSessionRuntimeMock(sessionStore: Record<string, unknown>) {
+  return {
+    getSessionEntry: vi.fn(
+      ({ sessionKey }: { sessionKey: string }) => sessionStore[sessionKey] as never,
+    ),
+    listSessionEntries: vi.fn(() =>
+      Object.entries(sessionStore).map(([sessionKey, entry]) => ({
+        sessionKey,
+        entry: entry as never,
+      })),
+    ),
+    patchSessionEntry: vi.fn(
+      async ({
+        sessionKey,
+        fallbackEntry,
+        update,
+      }: {
+        sessionKey: string;
+        fallbackEntry?: Record<string, unknown>;
+        update: (
+          entry: Record<string, unknown>,
+        ) => Promise<Record<string, unknown> | null> | Record<string, unknown> | null;
+      }) => {
+        const existing = (sessionStore[sessionKey] ?? fallbackEntry) as
+          | Record<string, unknown>
+          | undefined;
+        if (!existing) {
+          return null;
+        }
+        const patch = await update(existing);
+        if (!patch) {
+          return existing;
+        }
+        const next = { ...existing, ...patch };
+        sessionStore[sessionKey] = next;
+        return next;
+      },
+    ),
+    upsertSessionEntry: vi.fn(({ sessionKey, entry }: { sessionKey: string; entry: unknown }) => {
+      sessionStore[sessionKey] = entry;
+    }),
+  };
+}
+
 function jsonResponse(value: unknown): Response {
   return new Response(JSON.stringify(value), {
     status: 200,

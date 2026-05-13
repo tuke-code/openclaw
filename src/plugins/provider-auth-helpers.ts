@@ -1,9 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { OAuthCredentials } from "@earendil-works/pi-ai";
 import { resolveDefaultAgentDir } from "../agents/agent-scope-config.js";
 import { buildAuthProfileId } from "../agents/auth-profiles/identity.js";
 import { upsertAuthProfile, upsertAuthProfileWithLock } from "../agents/auth-profiles/profiles.js";
+import type { OAuthCredentials } from "../agents/pi-ai-contract.js";
 import { resolveProviderIdForAuth } from "../agents/provider-auth-aliases.js";
 import { resolveStateDir } from "../config/paths.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
@@ -18,7 +18,6 @@ import { normalizeSecretInput } from "../utils/normalize-secret-input.js";
 import type { SecretInputMode } from "./provider-auth-types.js";
 
 const ENV_REF_PATTERN = /^\$\{([A-Z][A-Z0-9_]*)\}$/;
-type UpsertAuthProfileParams = Parameters<typeof upsertAuthProfileWithLock>[0];
 
 const resolveAuthAgentDir = (agentDir?: string, config?: OpenClawConfig) =>
   agentDir ?? resolveDefaultAgentDir(config ?? {});
@@ -132,15 +131,6 @@ export function upsertApiKeyProfile(params: {
     agentDir: resolveAuthAgentDir(params.agentDir, params.options?.config),
   });
   return profileId;
-}
-
-async function upsertAuthProfileWithLockOrThrow(params: UpsertAuthProfileParams): Promise<void> {
-  const updated = await upsertAuthProfileWithLock(params);
-  if (!updated) {
-    throw new Error(
-      "Failed to update auth profile store; the auth store lock may be busy. Wait a moment and retry.",
-    );
-  }
 }
 
 export function applyAuthProfileConfig(
@@ -271,7 +261,7 @@ function resolveSiblingAgentDirs(primaryAgentDir: string): string[] {
     const real = safeRealpathSync(dir);
     if (real && !seen.has(real)) {
       seen.add(real);
-      result.push(real);
+      result.push(dir);
     }
   }
   return result;
@@ -301,7 +291,7 @@ export async function writeOAuthCredentials(
     ...(options?.displayName ? { displayName: options.displayName } : {}),
   };
 
-  await upsertAuthProfileWithLockOrThrow({
+  await upsertAuthProfileWithLock({
     profileId,
     credential,
     agentDir: resolvedAgentDir,

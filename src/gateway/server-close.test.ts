@@ -323,7 +323,9 @@ describe("createGatewayCloseHandler", () => {
     await close({ reason: "SIGTERM" });
 
     expect(drainActiveSessionsForShutdown).toHaveBeenCalledTimes(1);
-    expect(firstMockCall(drainActiveSessionsForShutdown)?.[0]?.reason).toBe("shutdown");
+    expect(drainActiveSessionsForShutdown.mock.calls[0][0]).toMatchObject({
+      reason: "shutdown",
+    });
   });
 
   it("drains the active-session tracker with reason=restart when restartExpectedMs is set", async () => {
@@ -338,7 +340,9 @@ describe("createGatewayCloseHandler", () => {
     await close({ reason: "gateway restarting", restartExpectedMs: 1234 });
 
     expect(drainActiveSessionsForShutdown).toHaveBeenCalledTimes(1);
-    expect(firstMockCall(drainActiveSessionsForShutdown)?.[0]?.reason).toBe("restart");
+    expect(drainActiveSessionsForShutdown.mock.calls[0][0]).toMatchObject({
+      reason: "restart",
+    });
   });
 
   it("drains pending restart replies before emitting session-end hooks", async () => {

@@ -139,12 +139,7 @@ export const PACKED_BUNDLED_RUNTIME_DEPS_REPAIR_ARGS = [
   "--fix",
   "--non-interactive",
 ] as const;
-export const PACKED_COMPLETION_SMOKE_ARGS = [
-  "completion",
-  "--write-state",
-  "--shell",
-  "zsh",
-] as const;
+export const PACKED_COMPLETION_SMOKE_ARGS = ["completion", "--shell", "zsh"] as const;
 
 export function collectSkillShellScriptExecutableErrors(rootDir = resolve(".")): string[] {
   if (process.platform === "win32") {
@@ -638,13 +633,6 @@ function runPackedBundledChannelEntrySmoke(): void {
         }),
       },
     );
-
-    const completionFiles = readdirSync(join(stateDir, "completions")).filter(
-      (entry) => !entry.startsWith("."),
-    );
-    if (completionFiles.length === 0) {
-      throw new Error("release-check: packed completion smoke produced no completion files.");
-    }
 
     runInstalledWorkspaceBootstrapSmoke({ packageRoot });
   } finally {

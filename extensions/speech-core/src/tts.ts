@@ -1,5 +1,3 @@
-import { existsSync, readFileSync } from "node:fs";
-import path from "node:path";
 import { resolveChannelTtsVoiceDelivery } from "openclaw/plugin-sdk/channel-targets";
 import type {
   OpenClawConfig,
@@ -24,14 +22,12 @@ import {
 } from "openclaw/plugin-sdk/runtime-config-snapshot";
 import { isVerbose, logVerbose } from "openclaw/plugin-sdk/runtime-env";
 import { tempWorkspaceSync, resolvePreferredOpenClawTmpDir } from "openclaw/plugin-sdk/sandbox";
-import { privateFileStoreSync } from "openclaw/plugin-sdk/security-runtime";
 import {
   normalizeLowercaseStringOrEmpty,
   normalizeOptionalLowercaseString,
   normalizeOptionalString,
 } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { stripMarkdown } from "openclaw/plugin-sdk/text-chunking";
-import { resolveConfigDir, resolveUserPath } from "openclaw/plugin-sdk/text-utility-runtime";
 import {
   canonicalizeSpeechProviderId,
   getSpeechProvider,
@@ -39,7 +35,9 @@ import {
   normalizeSpeechProviderId,
   normalizeTtsAutoMode,
   parseTtsDirectives,
+  readTtsUserPrefs,
   resolveEffectiveTtsConfig,
+  resolveTtsPrefsRef,
   type ResolvedTtsConfig,
   type ResolvedTtsModelOverrides,
   scheduleCleanup,
@@ -51,6 +49,8 @@ import {
   type TtsDirectiveOverrides,
   type TtsDirectiveParseResult,
   type TtsConfigResolutionContext,
+  type TtsUserPrefs,
+  updateTtsUserPrefs,
 } from "../api.js";
 
 export type {
@@ -84,17 +84,6 @@ function resolveSpeechProviderTimeoutMs(params: {
   }
   return resolvePositiveTimeoutMs(params.provider.defaultTimeoutMs) ?? params.config.timeoutMs;
 }
-
-type TtsUserPrefs = {
-  tts?: {
-    auto?: TtsAutoMode;
-    enabled?: boolean;
-    provider?: TtsProvider;
-    persona?: string | null;
-    maxLength?: number;
-    summarize?: boolean;
-  };
-};
 
 export type TtsAttemptReasonCode =
   | "success"
@@ -220,15 +209,8 @@ function normalizeTtsPersonaId(personaId: string | null | undefined): string | u
   return normalizeOptionalLowercaseString(personaId ?? undefined);
 }
 
-function resolveTtsPrefsPathValue(prefsPath: string | undefined): string {
-  if (prefsPath?.trim()) {
-    return resolveUserPath(prefsPath.trim());
-  }
-  const envPath = process.env.OPENCLAW_TTS_PREFS?.trim();
-  if (envPath) {
-    return resolveUserPath(envPath);
-  }
-  return path.join(resolveConfigDir(process.env), "settings", "tts.json");
+function resolveTtsPrefsPathValue(): string {
+  return resolveTtsPrefsRef();
 }
 
 function resolveModelOverridePolicy(
@@ -430,7 +412,6 @@ function collectDirectProviderConfigEntries(raw: TtsConfig): Record<string, Spee
     "modelOverrides",
     "persona",
     "personas",
-    "prefsPath",
     "provider",
     "providers",
     "summaryModel",
@@ -485,7 +466,6 @@ export function resolveTtsConfig(
     summaryModel: normalizeOptionalString(raw.summaryModel),
     modelOverrides: resolveModelOverridePolicy(raw.modelOverrides),
     providerConfigs: collectDirectProviderConfigEntries(raw),
-    prefsPath: raw.prefsPath,
     maxTextLength: raw.maxTextLength ?? DEFAULT_MAX_TEXT_LENGTH,
     timeoutMs,
     timeoutMsSource,
@@ -494,8 +474,8 @@ export function resolveTtsConfig(
   };
 }
 
-export function resolveTtsPrefsPath(config: ResolvedTtsConfig): string {
-  return resolveTtsPrefsPathValue(config.prefsPath);
+export function resolveTtsPrefsPath(_config: ResolvedTtsConfig): string {
+  return resolveTtsPrefsPathValue();
 }
 
 function resolveTtsAutoModeFromPrefs(prefs: TtsUserPrefs): TtsAutoMode | undefined {
@@ -540,7 +520,7 @@ function resolveEffectiveTtsAutoState(params: {
     channelId: params.channelId,
     accountId: params.accountId,
   });
-  const prefsPath = resolveTtsPrefsPathValue(raw.prefsPath);
+  const prefsPath = resolveTtsPrefsPathValue();
   const sessionAuto = normalizeTtsAutoMode(params.sessionAuto);
   if (sessionAuto) {
     return { autoMode: sessionAuto, prefsPath };
@@ -589,24 +569,11 @@ export function buildTtsSystemPromptHint(
 }
 
 function readPrefs(prefsPath: string): TtsUserPrefs {
-  try {
-    if (!existsSync(prefsPath)) {
-      return {};
-    }
-    return JSON.parse(readFileSync(prefsPath, "utf8")) as TtsUserPrefs;
-  } catch {
-    return {};
-  }
-}
-
-function atomicWriteFileSync(filePath: string, content: string): void {
-  privateFileStoreSync(path.dirname(filePath)).writeText(path.basename(filePath), content);
+  return readTtsUserPrefs(prefsPath);
 }
 
 function updatePrefs(prefsPath: string, update: (prefs: TtsUserPrefs) => void): void {
-  const prefs = readPrefs(prefsPath);
-  update(prefs);
-  atomicWriteFileSync(prefsPath, JSON.stringify(prefs, null, 2));
+  updateTtsUserPrefs(prefsPath, update);
 }
 
 export function isTtsEnabled(

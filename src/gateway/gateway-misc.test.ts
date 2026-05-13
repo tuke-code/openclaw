@@ -8,11 +8,6 @@ import {
   resetDiagnosticEventsForTest,
   type DiagnosticEventPayload,
 } from "../infra/diagnostic-events.js";
-import {
-  resetActiveManagedProxyStateForTests,
-  registerActiveManagedProxyUrl,
-  stopActiveManagedProxyRegistration,
-} from "../infra/net/proxy/active-proxy-state.js";
 import { defaultVoiceWakeTriggers } from "../infra/voicewake.js";
 import { handleControlUiHttpRequest } from "./control-ui.js";
 import {
@@ -70,10 +65,19 @@ vi.mock("ws", () => ({
 }));
 
 let GatewayClient: typeof import("./client.js").GatewayClient;
+let resetActiveManagedProxyStateForTests: typeof import("../infra/net/proxy/active-proxy-state.js")._resetActiveManagedProxyStateForTests;
+let registerActiveManagedProxyUrl: typeof import("../infra/net/proxy/active-proxy-state.js").registerActiveManagedProxyUrl;
+let stopActiveManagedProxyRegistration: typeof import("../infra/net/proxy/active-proxy-state.js").stopActiveManagedProxyRegistration;
 
 describe("GatewayClient", () => {
   beforeAll(async () => {
+    vi.resetModules();
     ({ GatewayClient } = await import("./client.js"));
+    ({
+      _resetActiveManagedProxyStateForTests: resetActiveManagedProxyStateForTests,
+      registerActiveManagedProxyUrl,
+      stopActiveManagedProxyRegistration,
+    } = await import("../infra/net/proxy/active-proxy-state.js"));
   });
 
   beforeEach(() => {

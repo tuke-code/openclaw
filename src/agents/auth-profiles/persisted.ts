@@ -1,7 +1,15 @@
-import { createHash } from "node:crypto";
-import { resolveOAuthPath } from "../../config/paths.js";
+import * as childProcess from "node:child_process";
+import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { resolveOAuthDir, resolveStateDir } from "../../config/paths.js";
 import { coerceSecretRef } from "../../config/types.secrets.js";
-import { loadJsonFile } from "../../infra/json-file.js";
+import { loadJsonFile, saveJsonFile } from "../../infra/json-file.js";
+import type {
+  OpenClawStateDatabase,
+  OpenClawStateDatabaseOptions,
+} from "../../state/openclaw-state-db.js";
 import { normalizeProviderId } from "../provider-id.js";
 import { AUTH_STORE_VERSION, log } from "./constants.js";
 import {
@@ -16,10 +24,18 @@ import {
   normalizeAuthEmailToken,
   normalizeAuthIdentityToken,
 } from "./oauth-shared.js";
-import { resolveAuthStorePath, resolveLegacyAuthStorePath } from "./paths.js";
+import { resolveAuthProfileStoreAgentDir, resolveAuthProfileStoreKey } from "./paths.js";
+import {
+  readAuthProfileStorePayloadResult,
+  readAuthProfileStorePayloadResultFromDatabase,
+  writeAuthProfileStorePayload,
+  writeAuthProfileStorePayloadInTransaction,
+  type AuthProfilePayloadValue,
+} from "./sqlite-storage.js";
 import {
   coerceAuthProfileState,
   loadPersistedAuthProfileState,
+  loadPersistedAuthProfileStateFromDatabase,
   mergeAuthProfileState,
 } from "./state.js";
 import type {
@@ -28,13 +44,20 @@ import type {
   AuthProfileSecretsStore,
   AuthProfileStore,
   OAuthCredential,
-  OAuthCredentials,
+  OAuthCredentialRef,
   ProfileUsageStats,
 } from "./types.js";
 
-export type LegacyAuthStore = Record<string, AuthProfileCredential>;
+export function authProfileStoreKey(agentDir?: string): string {
+  return resolveAuthProfileStoreKey(agentDir);
+}
 
-type LoadPersistedAuthProfileStoreOptions = {
+export type PersistedAuthProfileStoreEntry = {
+  store: AuthProfileStore;
+  updatedAt: number;
+};
+
+type LoadPersistedAuthProfileStoreOptions = OpenClawStateDatabaseOptions & {
   allowKeychainPrompt?: boolean;
   resolveLegacyOAuthSidecars?: boolean;
 };
@@ -43,9 +66,52 @@ type CredentialRejectReason = "non_object" | "invalid_type" | "missing_provider"
 type RejectedCredentialEntry = { key: string; reason: CredentialRejectReason };
 
 const AUTH_PROFILE_TYPES = new Set<AuthProfileCredential["type"]>(["api_key", "oauth", "token"]);
+const REDACTED_OAUTH_TOKEN_PROVIDER_IDS = new Set(["openai-codex"]);
+const OAUTH_PROFILE_SECRET_REF_SOURCE = "openclaw-credentials" as const;
 const LEGACY_OAUTH_REF_PROVIDER = "openai-codex";
+const OAUTH_PROFILE_SECRET_DIRNAME = "auth-profiles";
+const OAUTH_PROFILE_SECRET_VERSION = 1;
+const OAUTH_PROFILE_SECRET_ALGORITHM = "aes-256-gcm" as const;
+const OAUTH_PROFILE_SECRET_KEY_ENV = "OPENCLAW_AUTH_PROFILE_SECRET_KEY";
+const OAUTH_PROFILE_SECRET_KEYCHAIN_SERVICE = "OpenClaw Auth Profile Secrets";
+const OAUTH_PROFILE_SECRET_KEYCHAIN_ACCOUNT = "oauth-profile-master-key";
+const OAUTH_PROFILE_SECRET_KEY_FILE_NAME = "auth-profile-secret-key";
+const LEGACY_AUTH_PROFILE_FILENAME = "auth-profiles.json";
+const UNSAFE_LEGACY_AUTH_PROFILE_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 const runtimeLegacyOAuthSidecarCredentials = new WeakSet<OAuthCredential>();
 const runtimeLegacyOAuthSidecarMaterialFingerprints = new Map<string, string>();
+
+type OAuthProfileSecretMaterial = {
+  access?: string;
+  refresh?: string;
+  idToken?: string;
+};
+
+type OAuthProfileEncryptedSecretPayload = {
+  algorithm: typeof OAUTH_PROFILE_SECRET_ALGORITHM;
+  iv: string;
+  tag: string;
+  ciphertext: string;
+};
+
+type OAuthProfileSecretPayload = OAuthProfileSecretMaterial & {
+  version: typeof OAUTH_PROFILE_SECRET_VERSION;
+  profileId: string;
+  provider: string;
+  encrypted?: OAuthProfileEncryptedSecretPayload;
+};
+
+type OAuthProfileSecretPathOptions = Pick<OpenClawStateDatabaseOptions, "env">;
+
+type OAuthProfileSecretKeySeedOptions = { create?: boolean };
+
+type OAuthProfileSecretKeySeedDeps = {
+  env: NodeJS.ProcessEnv;
+  platform: NodeJS.Platform;
+  readMacKeychain: () => string | undefined;
+  readFile: () => string | undefined;
+  createFile: () => string | undefined;
+};
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
@@ -57,29 +123,6 @@ function normalizeOptionalCredentialString(value: unknown): string | undefined {
   }
   const trimmed = value.trim();
   return trimmed ? value : undefined;
-}
-
-function hasInlineOAuthTokenMaterial(credential: OAuthCredential): boolean {
-  return [credential.access, credential.refresh, credential.idToken].some(
-    (value) => typeof value === "string" && value.trim().length > 0,
-  );
-}
-
-function buildRuntimeLegacyOAuthSidecarFingerprintKey(params: {
-  storeKey?: string;
-  profileId: string;
-}): string {
-  return `${params.storeKey ?? ""}\0${params.profileId}`;
-}
-
-function buildLegacyOAuthSecretMaterialFingerprint(
-  material: Pick<OAuthCredential, "access" | "refresh" | "idToken">,
-): string {
-  return createHash("sha256")
-    .update(
-      JSON.stringify([material.access ?? null, material.refresh ?? null, material.idToken ?? null]),
-    )
-    .digest("hex");
 }
 
 function normalizeOptionalCredentialBoolean(value: unknown): boolean | undefined {
@@ -213,32 +256,550 @@ function normalizeRawCredentialEntry(raw: Record<string, unknown>): Partial<Auth
     if (expires !== undefined) {
       normalized.expires = expires;
     }
+    if (isOAuthProfileSecretRef(entry.oauthRef)) {
+      normalized.oauthRef = entry.oauthRef;
+    }
     return normalized;
   }
   return entry as Partial<AuthProfileCredential>;
+}
+
+function shouldPersistOAuthWithoutInlineSecrets(
+  credential: AuthProfileCredential,
+): credential is OAuthCredential {
+  return (
+    credential.type === "oauth" &&
+    REDACTED_OAUTH_TOKEN_PROVIDER_IDS.has(normalizeProviderId(credential.provider))
+  );
+}
+
+function resolveOAuthProfileSecretId(params: { agentDir?: string; profileId: string }): string {
+  return createHash("sha256")
+    .update(`${resolveAuthProfileStoreKey(params.agentDir)}\0${params.profileId}`)
+    .digest("hex")
+    .slice(0, 32);
+}
+
+function resolveOAuthProfileSecretPath(
+  ref: OAuthCredentialRef,
+  options: OAuthProfileSecretPathOptions = {},
+): string {
+  return path.join(resolveOAuthDir(options.env), OAUTH_PROFILE_SECRET_DIRNAME, `${ref.id}.json`);
+}
+
+function isOAuthProfileSecretRef(value: unknown): value is OAuthCredentialRef {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const record = value as Partial<OAuthCredentialRef>;
+  return (
+    record.source === OAUTH_PROFILE_SECRET_REF_SOURCE &&
+    record.provider === "openai-codex" &&
+    typeof record.id === "string" &&
+    /^[a-f0-9]{32}$/u.test(record.id)
+  );
+}
+
+function resolveOAuthProfileSecretRef(params: {
+  agentDir?: string;
+  profileId: string;
+}): OAuthCredentialRef {
+  return {
+    source: OAUTH_PROFILE_SECRET_REF_SOURCE,
+    provider: "openai-codex",
+    id: resolveOAuthProfileSecretId(params),
+  };
+}
+
+function hasInlineOAuthTokenMaterial(credential: OAuthCredential): boolean {
+  return [credential.access, credential.refresh, credential.idToken].some(
+    (value) => typeof value === "string" && value.trim().length > 0,
+  );
+}
+
+function buildRuntimeLegacyOAuthSidecarFingerprintKey(params: {
+  storeKey?: string;
+  profileId: string;
+}): string {
+  return `${params.storeKey ?? ""}\0${params.profileId}`;
+}
+
+function buildLegacyOAuthSecretMaterialFingerprint(
+  material: Pick<OAuthCredential, "access" | "refresh" | "idToken">,
+): string {
+  return createHash("sha256")
+    .update(
+      JSON.stringify([material.access ?? null, material.refresh ?? null, material.idToken ?? null]),
+    )
+    .digest("hex");
+}
+
+function normalizeOAuthProfileSecretMaterial(
+  credential: Partial<Pick<OAuthCredential, "access" | "refresh" | "idToken">>,
+): OAuthProfileSecretMaterial | null {
+  const material: OAuthProfileSecretMaterial = {
+    ...(typeof credential.access === "string" && credential.access.trim()
+      ? { access: credential.access }
+      : {}),
+    ...(typeof credential.refresh === "string" && credential.refresh.trim()
+      ? { refresh: credential.refresh }
+      : {}),
+    ...(typeof credential.idToken === "string" && credential.idToken.trim()
+      ? { idToken: credential.idToken }
+      : {}),
+  };
+  return Object.keys(material).length > 0 ? material : null;
+}
+
+function buildOAuthProfileSecretAad(params: {
+  ref: OAuthCredentialRef;
+  profileId: string;
+  provider: string;
+}): Buffer {
+  return Buffer.from(`${params.ref.id}\0${params.profileId}\0${params.provider}`, "utf8");
+}
+
+function readMacOAuthProfileSecretKey(): string | undefined {
+  if (process.platform !== "darwin") {
+    return undefined;
+  }
+  try {
+    return childProcess
+      .execFileSync(
+        "security",
+        [
+          "find-generic-password",
+          "-s",
+          OAUTH_PROFILE_SECRET_KEYCHAIN_SERVICE,
+          "-a",
+          OAUTH_PROFILE_SECRET_KEYCHAIN_ACCOUNT,
+          "-w",
+        ],
+        { encoding: "utf8", timeout: 5000, stdio: ["pipe", "pipe", "pipe"] },
+      )
+      .trim();
+  } catch {
+    return undefined;
+  }
+}
+
+function isPathInsideOrEqual(parentDir: string, candidatePath: string): boolean {
+  const relative = path.relative(path.resolve(parentDir), path.resolve(candidatePath));
+  return (
+    relative === "" || (!!relative && !relative.startsWith("..") && !path.isAbsolute(relative))
+  );
+}
+
+function uniquePaths(paths: Array<string | undefined>): string[] {
+  return Array.from(new Set(paths.filter((entry): entry is string => Boolean(entry))));
+}
+
+function resolveFallbackOAuthProfileSecretKeyFileCandidates(): string[] {
+  if (process.platform === "win32") {
+    const home = process.env.USERPROFILE?.trim() || os.homedir();
+    const root =
+      process.env.APPDATA?.trim() || (home ? path.join(home, "AppData", "Roaming") : undefined);
+    return uniquePaths([
+      root ? path.join(root, "OpenClaw", OAUTH_PROFILE_SECRET_KEY_FILE_NAME) : undefined,
+      home
+        ? path.join(home, ".openclaw-auth-profile-secrets", OAUTH_PROFILE_SECRET_KEY_FILE_NAME)
+        : undefined,
+    ]);
+  }
+
+  if (process.platform === "darwin") {
+    const home = process.env.HOME?.trim() || os.homedir();
+    return uniquePaths([
+      home
+        ? path.join(
+            home,
+            "Library",
+            "Application Support",
+            "OpenClaw",
+            OAUTH_PROFILE_SECRET_KEY_FILE_NAME,
+          )
+        : undefined,
+      home
+        ? path.join(home, ".openclaw-auth-profile-secrets", OAUTH_PROFILE_SECRET_KEY_FILE_NAME)
+        : undefined,
+    ]);
+  }
+
+  const home = process.env.HOME?.trim() || os.homedir();
+  const root =
+    process.env.XDG_CONFIG_HOME?.trim() || (home ? path.join(home, ".config") : undefined);
+  return uniquePaths([
+    root ? path.join(root, "openclaw", OAUTH_PROFILE_SECRET_KEY_FILE_NAME) : undefined,
+    home
+      ? path.join(home, ".openclaw-auth-profile-secrets", OAUTH_PROFILE_SECRET_KEY_FILE_NAME)
+      : undefined,
+  ]);
+}
+
+function resolveFallbackOAuthProfileSecretKeyFilePath(): string | undefined {
+  const stateDir = resolveStateDir();
+  return resolveFallbackOAuthProfileSecretKeyFileCandidates().find(
+    (candidate) => !isPathInsideOrEqual(stateDir, candidate),
+  );
+}
+
+function readFallbackOAuthProfileSecretKeyFile(): string | undefined {
+  const keyPath = resolveFallbackOAuthProfileSecretKeyFilePath();
+  if (!keyPath) {
+    return undefined;
+  }
+  return readFallbackOAuthProfileSecretKeyFileAtPath(keyPath);
+}
+
+function readFallbackOAuthProfileSecretKeyFileAtPath(keyPath: string): string | undefined {
+  try {
+    const value = fs.readFileSync(keyPath, "utf8").trim();
+    return value || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function readNonEmptyString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+function isSafeLegacyProviderKey(key: string): boolean {
+  return key.trim().length > 0 && !UNSAFE_LEGACY_AUTH_PROFILE_KEYS.has(key);
+}
+
+function inferLegacyCredentialType(
+  record: Record<string, unknown>,
+): AuthProfileCredential["type"] | undefined {
+  const explicit = readNonEmptyString(record.type) ?? readNonEmptyString(record.mode);
+  if (explicit === "api_key" || explicit === "token" || explicit === "oauth") {
+    return explicit;
+  }
+  if (readNonEmptyString(record.key) ?? readNonEmptyString(record.apiKey)) {
+    return "api_key";
+  }
+  if (readNonEmptyString(record.token)) {
+    return "token";
+  }
+  if (
+    readNonEmptyString(record.access) &&
+    readNonEmptyString(record.refresh) &&
+    typeof record.expires === "number"
+  ) {
+    return "oauth";
+  }
+  return undefined;
+}
+
+function coerceLegacyFlatCredential(
+  providerId: string,
+  raw: unknown,
+): AuthProfileCredential | null {
+  if (!isRecord(raw)) {
+    return null;
+  }
+  const provider = readNonEmptyString(raw.provider) ?? providerId;
+  const type = inferLegacyCredentialType(raw);
+  const email = readNonEmptyString(raw.email);
+  if (type === "api_key") {
+    const key = readNonEmptyString(raw.key) ?? readNonEmptyString(raw.apiKey);
+    return key ? { type, provider, key, ...(email ? { email } : {}) } : null;
+  }
+  if (type === "token") {
+    const token = readNonEmptyString(raw.token);
+    return token
+      ? {
+          type,
+          provider,
+          token,
+          ...(typeof raw.expires === "number" ? { expires: raw.expires } : {}),
+          ...(email ? { email } : {}),
+        }
+      : null;
+  }
+  if (type === "oauth") {
+    const access = readNonEmptyString(raw.access);
+    const refresh = readNonEmptyString(raw.refresh);
+    if (!access || !refresh || typeof raw.expires !== "number") {
+      return null;
+    }
+    return {
+      type,
+      provider,
+      access,
+      refresh,
+      expires: raw.expires,
+      ...(readNonEmptyString(raw.enterpriseUrl)
+        ? { enterpriseUrl: readNonEmptyString(raw.enterpriseUrl) }
+        : {}),
+      ...(readNonEmptyString(raw.projectId)
+        ? { projectId: readNonEmptyString(raw.projectId) }
+        : {}),
+      ...(readNonEmptyString(raw.accountId)
+        ? { accountId: readNonEmptyString(raw.accountId) }
+        : {}),
+      ...(email ? { email } : {}),
+    };
+  }
+  return null;
+}
+
+function createFallbackOAuthProfileSecretKeyFile(): string | undefined {
+  const keyPath = resolveFallbackOAuthProfileSecretKeyFilePath();
+  if (!keyPath) {
+    return undefined;
+  }
+  const generated = randomBytes(32).toString("base64url");
+  let fd: number | undefined;
+  try {
+    fs.mkdirSync(path.dirname(keyPath), { recursive: true, mode: 0o700 });
+    fd = fs.openSync(keyPath, "wx", 0o600);
+    fs.writeFileSync(fd, `${generated}\n`, "utf8");
+    try {
+      fs.chmodSync(keyPath, 0o600);
+    } catch {
+      // Best effort only; some platforms ignore POSIX modes.
+    }
+    return generated;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException)?.code === "EEXIST") {
+      return readFallbackOAuthProfileSecretKeyFileAtPath(keyPath);
+    }
+    log.warn("failed to create oauth profile secret key file", { err });
+    return undefined;
+  } finally {
+    if (fd !== undefined) {
+      try {
+        fs.closeSync(fd);
+      } catch {
+        // Best effort only.
+      }
+    }
+  }
+}
+
+function shouldReadMacKeychainForOAuthProfileSecrets(params?: {
+  env?: NodeJS.ProcessEnv;
+  platform?: NodeJS.Platform;
+}): boolean {
+  const env = params?.env ?? process.env;
+  const platform = params?.platform ?? process.platform;
+  return platform === "darwin" && env.VITEST !== "true" && env.VITEST_WORKER_ID === undefined;
+}
+
+function resolveOAuthProfileSecretKeySeedWithDeps(
+  options: OAuthProfileSecretKeySeedOptions | undefined,
+  deps: OAuthProfileSecretKeySeedDeps,
+): string | undefined {
+  const externalKey = deps.env[OAUTH_PROFILE_SECRET_KEY_ENV]?.trim();
+  if (externalKey) {
+    return externalKey;
+  }
+  if (deps.env.NODE_ENV === "test" && deps.env.VITEST === "true") {
+    return "openclaw-test-oauth-profile-secret-key";
+  }
+  if (shouldReadMacKeychainForOAuthProfileSecrets({ env: deps.env, platform: deps.platform })) {
+    const keychainKey = deps.readMacKeychain();
+    if (keychainKey) {
+      return keychainKey;
+    }
+  }
+  const fileKey = deps.readFile() ?? (options?.create === true ? deps.createFile() : undefined);
+  if (fileKey) {
+    return fileKey;
+  }
+  return undefined;
+}
+
+function resolveOAuthProfileSecretKeySeed(
+  options?: OAuthProfileSecretKeySeedOptions,
+): string | undefined {
+  return resolveOAuthProfileSecretKeySeedWithDeps(options, {
+    env: process.env,
+    platform: process.platform,
+    readMacKeychain: readMacOAuthProfileSecretKey,
+    readFile: readFallbackOAuthProfileSecretKeyFile,
+    createFile: createFallbackOAuthProfileSecretKeyFile,
+  });
+}
+
+function buildOAuthProfileSecretKey(options?: { create?: boolean }): Buffer | null {
+  const externalKey = resolveOAuthProfileSecretKeySeed(options);
+  if (!externalKey) {
+    return null;
+  }
+  return createHash("sha256").update(`openclaw:auth-profile-oauth:${externalKey}`).digest();
+}
+
+export const __testing = {
+  resolveOAuthProfileSecretKeySeedWithDeps,
+  shouldReadMacKeychainForOAuthProfileSecrets,
+};
+
+function encryptOAuthProfileSecretMaterial(params: {
+  ref: OAuthCredentialRef;
+  profileId: string;
+  provider: string;
+  material: OAuthProfileSecretMaterial;
+}): OAuthProfileEncryptedSecretPayload {
+  const key = buildOAuthProfileSecretKey({ create: true });
+  if (!key) {
+    throw new Error("OAuth profile secret key source is required to persist OAuth profile secrets");
+  }
+  const iv = randomBytes(12);
+  const cipher = createCipheriv(OAUTH_PROFILE_SECRET_ALGORITHM, key, iv);
+  cipher.setAAD(
+    buildOAuthProfileSecretAad({
+      ref: params.ref,
+      profileId: params.profileId,
+      provider: params.provider,
+    }),
+  );
+  const ciphertext = Buffer.concat([
+    cipher.update(JSON.stringify(params.material), "utf8"),
+    cipher.final(),
+  ]);
+  return {
+    algorithm: OAUTH_PROFILE_SECRET_ALGORITHM,
+    iv: iv.toString("base64url"),
+    tag: cipher.getAuthTag().toString("base64url"),
+    ciphertext: ciphertext.toString("base64url"),
+  };
+}
+
+function decryptOAuthProfileSecretMaterial(params: {
+  ref: OAuthCredentialRef;
+  profileId: string;
+  provider: string;
+  encrypted: OAuthProfileEncryptedSecretPayload;
+}): OAuthProfileSecretMaterial | null {
+  if (params.encrypted.algorithm !== OAUTH_PROFILE_SECRET_ALGORITHM) {
+    return null;
+  }
+  const key = buildOAuthProfileSecretKey();
+  if (!key) {
+    return null;
+  }
+  try {
+    const decipher = createDecipheriv(
+      OAUTH_PROFILE_SECRET_ALGORITHM,
+      key,
+      Buffer.from(params.encrypted.iv, "base64url"),
+    );
+    decipher.setAAD(
+      buildOAuthProfileSecretAad({
+        ref: params.ref,
+        profileId: params.profileId,
+        provider: params.provider,
+      }),
+    );
+    decipher.setAuthTag(Buffer.from(params.encrypted.tag, "base64url"));
+    const plaintext = Buffer.concat([
+      decipher.update(Buffer.from(params.encrypted.ciphertext, "base64url")),
+      decipher.final(),
+    ]).toString("utf8");
+    const raw = JSON.parse(plaintext) as unknown;
+    if (!raw || typeof raw !== "object") {
+      return null;
+    }
+    return normalizeOAuthProfileSecretMaterial(raw as OAuthProfileSecretMaterial);
+  } catch {
+    return null;
+  }
+}
+
+function writeOAuthProfileSecretMaterial(params: {
+  ref: OAuthCredentialRef;
+  profileId: string;
+  provider: string;
+  material: OAuthProfileSecretMaterial;
+  options?: OAuthProfileSecretPathOptions;
+}): void {
+  const secretPath = resolveOAuthProfileSecretPath(params.ref, params.options);
+  fs.mkdirSync(path.dirname(secretPath), { recursive: true, mode: 0o700 });
+  const payload: OAuthProfileSecretPayload = {
+    version: OAUTH_PROFILE_SECRET_VERSION,
+    profileId: params.profileId,
+    provider: params.provider,
+    encrypted: encryptOAuthProfileSecretMaterial(params),
+  };
+  saveJsonFile(secretPath, payload);
+  try {
+    fs.chmodSync(secretPath, 0o600);
+  } catch {
+    // Best effort only; some platforms ignore POSIX modes.
+  }
+}
+
+function persistOAuthProfileSecrets(params: {
+  agentDir?: string;
+  profileId: string;
+  credential: OAuthCredential;
+  options?: OAuthProfileSecretPathOptions;
+}): OAuthCredentialRef | undefined {
+  const expectedRef = resolveOAuthProfileSecretRef({
+    agentDir: params.agentDir,
+    profileId: params.profileId,
+  });
+  const existingRef = isOAuthProfileSecretRef(params.credential.oauthRef)
+    ? params.credential.oauthRef
+    : undefined;
+  const targetRef = existingRef?.id === expectedRef.id ? existingRef : expectedRef;
+  if (!hasInlineOAuthTokenMaterial(params.credential)) {
+    return existingRef?.id === expectedRef.id ? existingRef : undefined;
+  }
+  const material = normalizeOAuthProfileSecretMaterial(params.credential);
+  if (!material) {
+    return existingRef?.id === expectedRef.id ? existingRef : undefined;
+  }
+  writeOAuthProfileSecretMaterial({
+    ref: targetRef,
+    profileId: params.profileId,
+    provider: params.credential.provider,
+    material,
+    options: params.options,
+  });
+  return targetRef;
+}
+
+function omitInlineOAuthSecrets(params: {
+  agentDir?: string;
+  profileId: string;
+  credential: OAuthCredential;
+  options?: OAuthProfileSecretPathOptions;
+}): AuthProfileCredential {
+  const oauthRef = persistOAuthProfileSecrets(params);
+  if (!oauthRef) {
+    return params.credential;
+  }
+  const sanitized = { ...params.credential } as Record<string, unknown>;
+  delete sanitized.access;
+  delete sanitized.refresh;
+  delete sanitized.idToken;
+  sanitized.oauthRef = oauthRef;
+  return sanitized as AuthProfileCredential;
 }
 
 function parseCredentialEntry(
   raw: unknown,
   fallbackProvider?: string,
 ): { ok: true; credential: AuthProfileCredential } | { ok: false; reason: CredentialRejectReason } {
-  if (!isRecord(raw)) {
+  if (!raw || typeof raw !== "object") {
     return { ok: false, reason: "non_object" };
   }
-  const typed = normalizeRawCredentialEntry(raw);
+  const typed = normalizeRawCredentialEntry(raw as Record<string, unknown>);
   if (!AUTH_PROFILE_TYPES.has(typed.type as AuthProfileCredential["type"])) {
     return { ok: false, reason: "invalid_type" };
   }
   const provider = typed.provider ?? fallbackProvider;
-  const normalizedProvider = typeof provider === "string" ? normalizeProviderId(provider) : "";
-  if (!normalizedProvider) {
+  if (typeof provider !== "string" || provider.trim().length === 0) {
     return { ok: false, reason: "missing_provider" };
   }
   return {
     ok: true,
     credential: {
       ...typed,
-      provider: normalizedProvider,
+      provider: normalizeProviderId(provider),
     } as AuthProfileCredential,
   };
 }
@@ -278,9 +839,8 @@ function resolveLegacyOAuthSidecarCredential(params: {
   ) {
     return params.credential;
   }
-  // Read-only compatibility for #79006 sidecar OAuth profiles. Do not add
-  // new writers or OS-level Keychain creation here; doctor remains the path
-  // that migrates users back to canonical inline OAuth credentials.
+  // Compatibility for legacy Codex OAuth sidecars; doctor remains the explicit
+  // migration path that writes canonical inline credentials.
   const material = loadLegacyOAuthSidecarMaterial({
     ref: params.raw.oauthRef,
     profileId: params.profileId,
@@ -314,7 +874,7 @@ export function isRuntimeLegacyOAuthSidecarCredential(
 }
 
 export function matchesRuntimeLegacyOAuthSidecarMaterial(params: {
-  authPath?: string;
+  storeKey?: string;
   profileId: string;
   credential: AuthProfileCredential | undefined;
 }): boolean {
@@ -326,7 +886,7 @@ export function matchesRuntimeLegacyOAuthSidecarMaterial(params: {
   }
   const fingerprint = runtimeLegacyOAuthSidecarMaterialFingerprints.get(
     buildRuntimeLegacyOAuthSidecarFingerprintKey({
-      storeKey: params.authPath,
+      storeKey: params.storeKey,
       profileId: params.profileId,
     }),
   );
@@ -334,28 +894,6 @@ export function matchesRuntimeLegacyOAuthSidecarMaterial(params: {
     fingerprint !== undefined &&
     fingerprint === buildLegacyOAuthSecretMaterialFingerprint(params.credential)
   );
-}
-
-function coerceLegacyAuthStore(raw: unknown): LegacyAuthStore | null {
-  if (!isRecord(raw)) {
-    return null;
-  }
-  const record = raw;
-  if ("profiles" in record) {
-    return null;
-  }
-  const entries: LegacyAuthStore = {};
-  const rejected: RejectedCredentialEntry[] = [];
-  for (const [key, value] of Object.entries(record)) {
-    const parsed = parseCredentialEntry(value, key);
-    if (!parsed.ok) {
-      rejected.push({ key, reason: parsed.reason });
-      continue;
-    }
-    entries[key] = parsed.credential;
-  }
-  warnRejectedCredentialEntries("auth.json", rejected);
-  return Object.keys(entries).length > 0 ? entries : null;
 }
 
 export function coercePersistedAuthProfileStore(
@@ -390,13 +928,37 @@ export function coercePersistedAuthProfileStore(
           })
         : parsed.credential;
   }
-  warnRejectedCredentialEntries("auth-profiles.json", rejected);
-  const version = Number(record.version ?? AUTH_STORE_VERSION);
+  warnRejectedCredentialEntries("SQLite auth profile store", rejected);
   return {
-    version: Number.isFinite(version) && version > 0 ? version : AUTH_STORE_VERSION,
+    version:
+      typeof record.version === "number" && Number.isFinite(record.version)
+        ? record.version
+        : AUTH_STORE_VERSION,
     profiles: normalized,
     ...coerceAuthProfileState(record),
   };
+}
+
+function coerceLegacyFlatAuthProfileStore(raw: unknown): AuthProfileStore | null {
+  if (!isRecord(raw) || "profiles" in raw) {
+    return null;
+  }
+  const store: AuthProfileStore = {
+    version: AUTH_STORE_VERSION,
+    profiles: {},
+  };
+  for (const [key, value] of Object.entries(raw)) {
+    const providerId = key.trim();
+    if (!isSafeLegacyProviderKey(providerId)) {
+      continue;
+    }
+    const credential = coerceLegacyFlatCredential(providerId, value);
+    if (!credential) {
+      continue;
+    }
+    store.profiles[`${providerId}:default`] = credential;
+  }
+  return Object.keys(store.profiles).length > 0 ? store : null;
 }
 
 function mergeRecord<T>(
@@ -746,9 +1308,10 @@ export function buildPersistedAuthProfileSecretsStore(
     credential: AuthProfileCredential;
   }) => boolean,
   options?: {
+    agentDir?: string;
     existingRaw?: unknown;
     runtimeLegacyOAuthSidecarProfileIds?: ReadonlySet<string>;
-  },
+  } & OAuthProfileSecretPathOptions,
 ): AuthProfileSecretsStore {
   const profiles = Object.fromEntries(
     Object.entries(store.profiles).flatMap(([profileId, credential]) => {
@@ -765,11 +1328,24 @@ export function buildPersistedAuthProfileSecretsStore(
         delete sanitized.token;
         return [[profileId, sanitized]];
       }
+      if (shouldPersistOAuthWithoutInlineSecrets(credential)) {
+        return [
+          [
+            profileId,
+            omitInlineOAuthSecrets({
+              agentDir: options?.agentDir,
+              profileId,
+              credential,
+              options,
+            }),
+          ],
+        ];
+      }
       return [[profileId, credential]];
     }),
   ) as AuthProfileSecretsStore["profiles"];
 
-  const payload: AuthProfileSecretsStore = {
+  const payload = {
     version: AUTH_STORE_VERSION,
     profiles,
   };
@@ -804,18 +1380,18 @@ function preserveLegacyOAuthRefsForDoctorMigration(
     if (hasInlineOAuthTokenMaterial(credential)) {
       const isRuntimeSidecarMaterial =
         options?.runtimeLegacyOAuthSidecarProfileIds?.has(profileId) === true;
-      // Untracked inline material may be a real token refresh. Only reread the
-      // sidecar then, and never use Keychain from this save-path check.
       if (
         !isRuntimeSidecarMaterial &&
         !isUnchangedLegacyOAuthSidecarMaterial({ profileId, rawProfile, credential })
       ) {
         continue;
       }
+    } else if (
+      isOAuthProfileSecretRef(credential.oauthRef) &&
+      options?.runtimeLegacyOAuthSidecarProfileIds?.has(profileId) !== true
+    ) {
+      continue;
     }
-    // Removal-only retention for #79006: ordinary runtime saves must not turn
-    // rehydrated sidecar tokens into inline credentials. Doctor remains the
-    // explicit migration path that creates backups and removes sidecars.
     profiles ??= { ...payload.profiles };
     const sanitized = { ...credential } as Record<string, unknown>;
     delete sanitized.access;
@@ -858,86 +1434,264 @@ function isSameLegacyOAuthSecretMaterial(
   );
 }
 
-export function applyLegacyAuthStore(store: AuthProfileStore, legacy: LegacyAuthStore): void {
-  for (const [provider, cred] of Object.entries(legacy)) {
-    const profileId = `${provider}:default`;
-    const credentialProvider = cred.provider ?? provider;
-    if (cred.type === "api_key") {
-      store.profiles[profileId] = {
-        type: "api_key",
-        provider: credentialProvider,
-        key: cred.key,
-        ...(cred.email ? { email: cred.email } : {}),
-      };
+function collectPersistedOAuthProfileSecretIds(
+  store: AuthProfileStore | AuthProfileSecretsStore,
+): Set<string> {
+  const ids = new Set<string>();
+  for (const credential of Object.values(store.profiles)) {
+    if (credential.type === "oauth" && isOAuthProfileSecretRef(credential.oauthRef)) {
+      ids.add(credential.oauthRef.id);
+    }
+  }
+  return ids;
+}
+
+export function removeDetachedOAuthProfileSecrets(params: {
+  previousRaw: unknown;
+  nextStore: AuthProfileSecretsStore;
+  options?: OAuthProfileSecretPathOptions;
+}): void {
+  const previousStore = coercePersistedAuthProfileStore(params.previousRaw);
+  if (!previousStore) {
+    return;
+  }
+  const previousIds = collectPersistedOAuthProfileSecretIds(previousStore);
+  if (previousIds.size === 0) {
+    return;
+  }
+  const nextIds = collectPersistedOAuthProfileSecretIds(params.nextStore);
+  for (const id of previousIds) {
+    if (nextIds.has(id)) {
       continue;
     }
-    if (cred.type === "token") {
-      store.profiles[profileId] = {
-        type: "token",
-        provider: credentialProvider,
-        token: cred.token,
-        ...(typeof cred.expires === "number" ? { expires: cred.expires } : {}),
-        ...(cred.email ? { email: cred.email } : {}),
-      };
-      continue;
-    }
-    store.profiles[profileId] = {
-      type: "oauth",
-      provider: credentialProvider,
-      access: cred.access,
-      refresh: cred.refresh,
-      expires: cred.expires,
-      ...(cred.enterpriseUrl ? { enterpriseUrl: cred.enterpriseUrl } : {}),
-      ...(cred.projectId ? { projectId: cred.projectId } : {}),
-      ...(cred.accountId ? { accountId: cred.accountId } : {}),
-      ...(cred.email ? { email: cred.email } : {}),
-    };
+    const secretPath = resolveOAuthProfileSecretPath(
+      {
+        source: OAUTH_PROFILE_SECRET_REF_SOURCE,
+        provider: "openai-codex",
+        id,
+      },
+      params.options,
+    );
+    fs.rmSync(secretPath, { force: true });
   }
 }
 
-export function mergeOAuthFileIntoStore(store: AuthProfileStore): boolean {
-  const oauthPath = resolveOAuthPath();
-  const oauthRaw = loadJsonFile(oauthPath);
-  if (!oauthRaw || typeof oauthRaw !== "object") {
-    return false;
+function coerceOAuthProfileEncryptedSecretPayload(
+  raw: unknown,
+): OAuthProfileEncryptedSecretPayload | null {
+  if (!raw || typeof raw !== "object") {
+    return null;
   }
-  const oauthEntries = oauthRaw as Record<string, OAuthCredentials>;
-  let mutated = false;
-  for (const [provider, creds] of Object.entries(oauthEntries)) {
-    if (!creds || typeof creds !== "object") {
-      continue;
-    }
-    const profileId = `${provider}:default`;
-    if (store.profiles[profileId]) {
-      continue;
-    }
-    store.profiles[profileId] = {
-      type: "oauth",
+  const record = raw as Partial<OAuthProfileEncryptedSecretPayload>;
+  return record.algorithm === OAUTH_PROFILE_SECRET_ALGORITHM &&
+    typeof record.iv === "string" &&
+    typeof record.tag === "string" &&
+    typeof record.ciphertext === "string"
+    ? {
+        algorithm: record.algorithm,
+        iv: record.iv,
+        tag: record.tag,
+        ciphertext: record.ciphertext,
+      }
+    : null;
+}
+
+function coerceOAuthProfileSecretPayload(params: {
+  raw: unknown;
+  ref: OAuthCredentialRef;
+  profileId: string;
+  provider: string;
+}): OAuthProfileSecretMaterial | null {
+  const { raw, ref, profileId, provider } = params;
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+  const record = raw as Partial<OAuthProfileSecretPayload>;
+  if (
+    record.version !== OAUTH_PROFILE_SECRET_VERSION ||
+    record.profileId !== profileId ||
+    record.provider !== provider
+  ) {
+    return null;
+  }
+  const encrypted = coerceOAuthProfileEncryptedSecretPayload(record.encrypted);
+  if (encrypted) {
+    return decryptOAuthProfileSecretMaterial({
+      ref,
+      profileId,
       provider,
-      ...creds,
-    };
-    mutated = true;
+      encrypted,
+    });
   }
-  return mutated;
+  return normalizeOAuthProfileSecretMaterial(record);
 }
 
-export function loadPersistedAuthProfileStore(
+function resolvePersistedOAuthSecrets(
+  credential: OAuthCredential,
+  profileId: string,
+  options: OAuthProfileSecretPathOptions = {},
+): OAuthCredential {
+  if (!isOAuthProfileSecretRef(credential.oauthRef)) {
+    return credential;
+  }
+  const secret = coerceOAuthProfileSecretPayload({
+    raw: loadJsonFile(resolveOAuthProfileSecretPath(credential.oauthRef, options)),
+    ref: credential.oauthRef,
+    profileId,
+    provider: credential.provider,
+  });
+  if (!secret) {
+    return credential;
+  }
+  return {
+    ...credential,
+    ...(secret.access ? { access: secret.access } : {}),
+    ...(secret.refresh ? { refresh: secret.refresh } : {}),
+    ...(secret.idToken ? { idToken: secret.idToken } : {}),
+  } as OAuthCredential;
+}
+
+function resolvePersistedOAuthProfileSecrets(
+  store: AuthProfileStore,
+  options: OAuthProfileSecretPathOptions = {},
+): AuthProfileStore {
+  const profiles = Object.fromEntries(
+    Object.entries(store.profiles).map(([profileId, credential]) => [
+      profileId,
+      credential.type === "oauth"
+        ? resolvePersistedOAuthSecrets(credential, profileId, options)
+        : credential,
+    ]),
+  ) as AuthProfileStore["profiles"];
+  return {
+    ...store,
+    profiles,
+  };
+}
+
+export function loadPersistedAuthProfileStoreEntryFromDatabase(
+  database: OpenClawStateDatabase,
   agentDir?: string,
-  options?: LoadPersistedAuthProfileStoreOptions,
-): AuthProfileStore | null {
-  const authPath = resolveAuthStorePath(agentDir);
-  const raw = loadJsonFile(authPath);
-  const store = coercePersistedAuthProfileStore(raw, options, authPath);
+  options: LoadPersistedAuthProfileStoreOptions = {},
+): PersistedAuthProfileStoreEntry | null {
+  const result = readAuthProfileStorePayloadResultFromDatabase(
+    database,
+    authProfileStoreKey(agentDir),
+  );
+  if (!result.exists || result.value === undefined) {
+    return null;
+  }
+  const raw = result.value;
+  const store = coercePersistedAuthProfileStore(raw, options, authProfileStoreKey(agentDir));
   if (!store) {
     return null;
   }
   const merged = {
     ...store,
-    ...mergeAuthProfileState(coerceAuthProfileState(raw), loadPersistedAuthProfileState(agentDir)),
+    ...mergeAuthProfileState(
+      coerceAuthProfileState(raw),
+      loadPersistedAuthProfileStateFromDatabase(database, agentDir),
+    ),
   };
-  return merged;
+  return {
+    store: resolvePersistedOAuthProfileSecrets(merged, options),
+    updatedAt: result.updatedAt,
+  };
 }
 
-export function loadLegacyAuthProfileStore(agentDir?: string): LegacyAuthStore | null {
-  return coerceLegacyAuthStore(loadJsonFile(resolveLegacyAuthStorePath(agentDir)));
+export function loadPersistedAuthProfileStoreEntry(
+  agentDir?: string,
+  options: LoadPersistedAuthProfileStoreOptions = {},
+): PersistedAuthProfileStoreEntry | null {
+  const result = readAuthProfileStorePayloadResult(authProfileStoreKey(agentDir), options);
+  if (!result.exists || result.value === undefined) {
+    return null;
+  }
+  const raw = result.value;
+  const store = coercePersistedAuthProfileStore(raw, options, authProfileStoreKey(agentDir));
+  if (!store) {
+    return null;
+  }
+  const merged = {
+    ...store,
+    ...mergeAuthProfileState(
+      coerceAuthProfileState(raw),
+      loadPersistedAuthProfileState(agentDir, options),
+    ),
+  };
+  return {
+    store: resolvePersistedOAuthProfileSecrets(merged, options),
+    updatedAt: result.updatedAt,
+  };
+}
+
+export function loadLegacyAuthProfileStoreEntry(
+  agentDir?: string,
+  options: LoadPersistedAuthProfileStoreOptions = {},
+): PersistedAuthProfileStoreEntry | null {
+  const authPath = path.join(
+    resolveAuthProfileStoreAgentDir(agentDir),
+    LEGACY_AUTH_PROFILE_FILENAME,
+  );
+  const raw = loadJsonFile(authPath);
+  const store =
+    coercePersistedAuthProfileStore(raw, options, authProfileStoreKey(agentDir)) ??
+    coerceLegacyFlatAuthProfileStore(raw);
+  if (!store) {
+    return null;
+  }
+  let updatedAt = Date.now();
+  try {
+    updatedAt = fs.statSync(authPath).mtimeMs;
+  } catch {
+    // Missing stat is harmless: the payload already loaded successfully.
+  }
+  return {
+    store: resolvePersistedOAuthProfileSecrets(store, options),
+    updatedAt,
+  };
+}
+
+export function loadPersistedAuthProfileStore(
+  agentDir?: string,
+  options: LoadPersistedAuthProfileStoreOptions = {},
+): AuthProfileStore | null {
+  return loadPersistedAuthProfileStoreEntry(agentDir, options)?.store ?? null;
+}
+
+export function savePersistedAuthProfileSecretsStore(
+  store: AuthProfileSecretsStore,
+  agentDir?: string,
+  options: OpenClawStateDatabaseOptions = {},
+): void {
+  const payload = buildPersistedAuthProfileSecretsStore(store, undefined, {
+    agentDir,
+    env: options.env,
+  });
+  writeAuthProfileStorePayload(
+    authProfileStoreKey(agentDir),
+    payload as unknown as AuthProfilePayloadValue,
+    options,
+  );
+}
+
+export function savePersistedAuthProfileSecretsStoreInTransaction(
+  database: OpenClawStateDatabase,
+  store: AuthProfileSecretsStore,
+  agentDir?: string,
+  updatedAt: number = Date.now(),
+): void {
+  writeAuthProfileStorePayloadInTransaction(
+    database,
+    authProfileStoreKey(agentDir),
+    store as unknown as AuthProfilePayloadValue,
+    updatedAt,
+  );
+}
+
+export function hasPersistedAuthProfileSecretsStore(
+  agentDir?: string,
+  options: OpenClawStateDatabaseOptions = {},
+): boolean {
+  return readAuthProfileStorePayloadResult(authProfileStoreKey(agentDir), options).exists;
 }

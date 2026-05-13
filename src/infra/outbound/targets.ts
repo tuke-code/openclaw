@@ -87,6 +87,7 @@ export function resolveOutboundTarget(params: {
 export function resolveHeartbeatDeliveryTarget(params: {
   cfg: OpenClawConfig;
   entry?: SessionEntry;
+  deliveryContext?: DeliveryContext;
   heartbeat?: AgentDefaultsConfig["heartbeat"];
   turnSource?: DeliveryContext;
 }): OutboundTarget {
@@ -104,7 +105,7 @@ export function resolveHeartbeatDeliveryTarget(params: {
   }
 
   if (target === "none") {
-    const base = resolveSessionDeliveryTarget({ entry });
+    const base = resolveSessionDeliveryTarget({ entry, deliveryContext: params.deliveryContext });
     return buildNoHeartbeatDeliveryTarget({
       reason: "target-none",
       lastChannel: base.lastChannel,
@@ -114,11 +115,15 @@ export function resolveHeartbeatDeliveryTarget(params: {
 
   const resolvedTurnSource =
     target === "last"
-      ? mergeDeliveryContext(params.turnSource, deliveryContextFromSession(entry))
+      ? mergeDeliveryContext(
+          params.turnSource,
+          params.deliveryContext ?? deliveryContextFromSession(entry),
+        )
       : undefined;
 
   const resolvedTarget = resolveSessionDeliveryTarget({
     entry,
+    deliveryContext: params.deliveryContext,
     requestedChannel: target === "last" ? "last" : target,
     explicitTo: heartbeat?.to,
     mode: "heartbeat",
@@ -129,7 +134,7 @@ export function resolveHeartbeatDeliveryTarget(params: {
     turnSourceTo: resolvedTurnSource?.to,
     turnSourceAccountId: resolvedTurnSource?.accountId,
     // Only pass threadId from an explicit turn source (e.g., restart sentinel's
-    // delivery context). Do NOT fall back to session-stored threadId here —
+    // delivery context). Do NOT fall back to a persisted session-row threadId here —
     // heartbeat mode intentionally drops inherited thread IDs to avoid replying
     // in stale threads (e.g., Slack thread_ts). The sentinel's delivery context
     // carries the correct topic/thread ID when present.
@@ -384,7 +389,7 @@ export function resolveHeartbeatSenderContext(params: {
   const sender = resolveHeartbeatSenderId({
     allowFrom,
     deliveryTo: params.delivery.to,
-    lastTo: params.entry?.lastTo,
+    lastTo: params.entry?.deliveryContext?.to,
     provider,
   });
 

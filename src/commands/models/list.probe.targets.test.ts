@@ -155,7 +155,7 @@ async function withClearedZaiEnv<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
-async function buildAnthropicPlanFromModelsJsonApiKey(apiKey: string) {
+async function buildAnthropicPlanFromModelCatalogApiKey(apiKey: string) {
   return await buildProbeTargets({
     cfg: {
       models: {
@@ -285,36 +285,36 @@ describe("buildProbeTargets reason codes", () => {
     expect(plan.results[0]?.error).toContain("env:default:MISSING_ANTHROPIC_TOKEN");
   });
 
-  it("skips marker-only models.json credentials when building probe targets", async () => {
+  it("skips marker-only model catalog credentials when building probe targets", async () => {
     mockStore = {
       version: 1,
       profiles: {},
       order: {},
     };
     await withClearedAnthropicEnv(async () => {
-      const plan = await buildAnthropicPlanFromModelsJsonApiKey("ollama-local");
+      const plan = await buildAnthropicPlanFromModelCatalogApiKey("ollama-local");
       expect(plan.targets).toStrictEqual([]);
       expect(plan.results).toStrictEqual([]);
     });
   });
 
-  it("does not treat arbitrary all-caps models.json apiKey values as markers", async () => {
+  it("does not treat arbitrary all-caps model catalog apiKey values as markers", async () => {
     mockStore = {
       version: 1,
       profiles: {},
       order: {},
     };
     await withClearedAnthropicEnv(async () => {
-      const plan = await buildAnthropicPlanFromModelsJsonApiKey("ALLCAPS_SAMPLE");
+      const plan = await buildAnthropicPlanFromModelCatalogApiKey("ALLCAPS_SAMPLE");
       expect(plan.results).toStrictEqual([]);
       expect(plan.targets).toStrictEqual([
-        {
-          label: "models.json",
+        expect.objectContaining({
+          label: "model catalog",
           mode: "api_key",
           model: { provider: "anthropic", model: "claude-sonnet-4-6" },
           provider: "anthropic",
-          source: "models.json",
-        },
+          source: "model_catalog",
+        }),
       ]);
     });
   });
@@ -354,13 +354,13 @@ describe("buildProbeTargets reason codes", () => {
 
       expect(plan.results).toStrictEqual([]);
       expect(plan.targets).toStrictEqual([
-        {
-          label: "models.json",
+        expect.objectContaining({
+          label: "model catalog",
           mode: "api_key",
-          model: { provider: "zai", model: "glm-4.7" },
           provider: "zai",
-          source: "models.json",
-        },
+          model: { provider: "zai", model: "glm-4.7" },
+          source: "model_catalog",
+        }),
       ]);
     });
   });
@@ -408,11 +408,11 @@ describe("buildProbeTargets reason codes", () => {
     expect(plan.results).toStrictEqual([]);
     expect(plan.targets).toStrictEqual([
       {
-        label: "models.json",
+        label: "model catalog",
         mode: "api_key",
         model: { provider: "anthropic", model: "claude-haiku-4-5-20251001" },
         provider: "anthropic",
-        source: "models.json",
+        source: "model_catalog",
       },
     ]);
   });

@@ -66,7 +66,6 @@ const sessionRuntimeMethods = [
   "recordInboundSession",
   "resolveInboundLastRouteSessionKey",
   "resolvePinnedMainDmOwnerFromAllowlist",
-  "resolveStorePath",
 ] as const satisfies readonly (keyof TelegramMessageContextSessionRuntime)[];
 
 function hasCompleteSessionRuntime(
@@ -87,17 +86,6 @@ async function loadTelegramMessageContextSessionRuntime(
     ...(await import("./bot-message-context.session.runtime.js")),
     ...runtime,
   };
-}
-
-export async function resolveTelegramMessageContextStorePath(params: {
-  cfg: OpenClawConfig;
-  agentId: string;
-  sessionRuntime?: TelegramMessageContextSessionRuntimeOverrides;
-}): Promise<string> {
-  const sessionRuntime = await loadTelegramMessageContextSessionRuntime(params.sessionRuntime);
-  return sessionRuntime.resolveStorePath(params.cfg.session?.store, {
-    agentId: params.agentId,
-  });
 }
 
 function replyTargetToChainEntry(replyTarget: TelegramReplyTarget): TelegramReplyChainEntry {
@@ -192,7 +180,6 @@ export async function buildTelegramInboundContextPayload(params: {
   ctxPayload: TelegramInboundContextPayload;
   skillFilter: string[] | undefined;
   turn: {
-    storePath: string;
     recordInboundSession: TelegramMessageContextSessionRuntime["recordInboundSession"];
     record: {
       updateLastRoute?: Parameters<
@@ -350,14 +337,9 @@ export async function buildTelegramInboundContextPayload(params: {
     ? (groupLabel ?? `group:${chatId}`)
     : buildSenderLabel(msg, senderId || chatId);
   const sessionRuntime = await loadTelegramMessageContextSessionRuntime(sessionRuntimeOverride);
-  const storePath = await resolveTelegramMessageContextStorePath({
-    cfg,
-    agentId: route.agentId,
-    sessionRuntime: sessionRuntimeOverride,
-  });
   const envelopeOptions = resolveEnvelopeFormatOptions(cfg);
   const previousTimestamp = sessionRuntime.readSessionUpdatedAt({
-    storePath,
+    agentId: route.agentId,
     sessionKey: route.sessionKey,
   });
   const body = formatInboundEnvelope({
@@ -649,7 +631,6 @@ export async function buildTelegramInboundContextPayload(params: {
     ctxPayload,
     skillFilter,
     turn: {
-      storePath,
       recordInboundSession: sessionRuntime.recordInboundSession,
       record: {
         updateLastRoute,

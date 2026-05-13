@@ -7,8 +7,8 @@ describe("silent reply config resolution", () => {
     expect(resolveSilentReplyPolicy({ surface: "webchat" })).toBe("disallow");
     expect(
       resolveSilentReplyPolicy({
-        sessionKey: "agent:main:telegram:group:123",
         surface: "telegram",
+        conversationType: "group",
       }),
     ).toBe("allow");
     expect(
@@ -34,8 +34,8 @@ describe("silent reply config resolution", () => {
     expect(
       resolveSilentReplyPolicy({
         cfg,
-        sessionKey: "agent:main:discord:group:123",
         surface: "discord",
+        conversationType: "group",
       }),
     ).toBe("disallow");
   });
@@ -62,8 +62,8 @@ describe("silent reply config resolution", () => {
     expect(
       resolveSilentReplyPolicy({
         cfg,
-        sessionKey: "agent:main:telegram:group:123",
         surface: "telegram",
+        conversationType: "group",
       }),
     ).toBe("disallow");
   });

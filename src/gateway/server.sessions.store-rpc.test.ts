@@ -1,57 +1,76 @@
 import fs from "node:fs/promises";
-import path from "node:path";
 import { expect, test, vi } from "vitest";
-import { piSdkMock, rpcReq, testState, writeSessionStore } from "./test-helpers.js";
+import { getSessionEntry } from "../config/sessions.js";
 import {
-  directSessionReq as directSessionHandlerReq,
+  loadSqliteSessionTranscriptEvents,
+  replaceSqliteSessionTranscriptEvents,
+} from "../config/sessions/transcript-store.sqlite.js";
+import { piSdkMock, rpcReq, seedGatewaySessionEntries, testState } from "./test-helpers.js";
+import {
   setupGatewaySessionsTestHarness,
   getGatewayConfigModule,
   getSessionsHandlers,
 } from "./test/server-sessions.test-helpers.js";
 
-const { createSessionStoreDir, openClient } = setupGatewaySessionsTestHarness();
+const { createSessionFixtureDir, openClient } = setupGatewaySessionsTestHarness();
 
-function collectNonEmptyLines(text: string): string[] {
-  const lines: string[] = [];
-  for (const line of text.split(/\r?\n/)) {
-    if (line.trim().length > 0) {
-      lines.push(line);
-    }
+async function directSessionHandlerReq<TPayload = unknown>(
+  method: keyof Awaited<ReturnType<typeof getSessionsHandlers>>,
+  params: Record<string, unknown>,
+): Promise<{ ok: boolean; payload?: TPayload; error?: unknown }> {
+  const sessionsHandlers = await getSessionsHandlers();
+  const { getRuntimeConfig } = await getGatewayConfigModule();
+  let result:
+    | {
+        ok: boolean;
+        payload?: TPayload;
+        error?: unknown;
+      }
+    | undefined;
+  await sessionsHandlers[method]({
+    req: {} as never,
+    params,
+    respond: (ok, payload, error) => {
+      result = {
+        ok,
+        payload: payload === undefined ? undefined : (payload as TPayload),
+        error,
+      };
+    },
+    context: {
+      broadcastToConnIds: vi.fn(),
+      getSessionEventSubscriberConnIds: () => new Set<string>(),
+      logGateway: { debug: vi.fn() },
+      loadGatewayModelCatalog: async () => piSdkMock.models,
+      getRuntimeConfig,
+    } as never,
+    client: null,
+    isWebchatConnect: () => false,
+  });
+  if (!result) {
+    throw new Error(`${String(method)} did not respond`);
   }
-  return lines;
+  return result;
 }
 
-function expectSinglePrefixedFilename(files: string[], prefix: string): string {
-  const matches = files.filter((file) => file.startsWith(prefix));
-  expect(matches).toHaveLength(1);
-  const [match] = matches;
-  if (!match) {
-    throw new Error(`Expected one filename with prefix ${prefix}`);
-  }
-  expect(match.length).toBeGreaterThan(prefix.length);
-  return match;
-}
-
-test("lists and patches session store via sessions.* RPC", async () => {
-  const { dir, storePath } = await createSessionStoreDir();
+test("lists and patches session entries via sessions.* RPC", async () => {
+  await createSessionFixtureDir();
   const now = Date.now();
   const recent = now - 30_000;
   const stale = now - 15 * 60_000;
 
-  await fs.writeFile(
-    path.join(dir, "sess-main.jsonl"),
-    `${Array.from({ length: 10 })
-      .map((_, idx) => JSON.stringify({ role: "user", content: `line ${idx}` }))
-      .join("\n")}\n`,
-    "utf-8",
-  );
-  await fs.writeFile(
-    path.join(dir, "sess-group.jsonl"),
-    `${JSON.stringify({ role: "user", content: "group line 0" })}\n`,
-    "utf-8",
-  );
+  replaceSqliteSessionTranscriptEvents({
+    agentId: "main",
+    sessionId: "sess-main",
+    events: Array.from({ length: 10 }, (_, idx) => ({ role: "user", content: `line ${idx}` })),
+  });
+  replaceSqliteSessionTranscriptEvents({
+    agentId: "main",
+    sessionId: "sess-group",
+    events: [{ role: "user", content: "group line 0" }],
+  });
 
-  await writeSessionStore({
+  await seedGatewaySessionEntries({
     entries: {
       main: {
         sessionId: "sess-main",
@@ -88,7 +107,6 @@ test("lists and patches session store via sessions.* RPC", async () => {
   const methods = (hello as { features?: { methods?: string[] } }).features?.methods ?? [];
   expect(methods).toContain("sessions.list");
   expect(methods).toContain("sessions.preview");
-  expect(methods).toContain("sessions.cleanup");
   expect(methods).toContain("sessions.patch");
   expect(methods).toContain("sessions.reset");
   expect(methods).toContain("sessions.delete");
@@ -153,7 +171,7 @@ test("lists and patches session store via sessions.* RPC", async () => {
   ws.close();
 
   const list1 = await directSessionReq<{
-    path: string;
+    databasePath: string;
     defaults?: { model?: string | null; modelProvider?: string | null };
     sessions: Array<{
       key: string;
@@ -167,8 +185,8 @@ test("lists and patches session store via sessions.* RPC", async () => {
   }>("sessions.list", { includeGlobal: false, includeUnknown: false });
 
   expect(list1.ok).toBe(true);
-  expect(list1.payload?.path).toBe(storePath);
-  expect(list1.payload?.sessions.map((session) => session.key)).not.toContain("global");
+  expect(list1.payload?.databasePath).toMatch(/openclaw-agent\.sqlite$/);
+  expect(list1.payload?.sessions.some((s) => s.key === "global")).toBe(false);
   expect(list1.payload?.defaults?.modelProvider).toBe("anthropic");
   const main = list1.payload?.sessions.find((s) => s.key === "agent:main:main");
   expect(main?.totalTokens).toBeUndefined();
@@ -326,23 +344,6 @@ test("lists and patches session store via sessions.* RPC", async () => {
   });
   expect(spawnedPatchedInvalidKey.ok).toBe(false);
 
-  const cleaned = await directSessionReq<{
-    applied: true;
-    missing: number;
-    appliedCount: number;
-  }>("sessions.cleanup", {
-    enforce: true,
-    fixMissing: true,
-  });
-  expect(cleaned.ok).toBe(true);
-  expect(cleaned.payload?.missing).toBeGreaterThanOrEqual(1);
-  const listAfterCleanup = await directSessionReq<{
-    sessions: Array<{ key: string }>;
-  }>("sessions.list", {});
-  expect(listAfterCleanup.payload?.sessions.map((session) => session.key)).not.toContain(
-    "agent:main:subagent:one",
-  );
-
   piSdkMock.enabled = true;
   piSdkMock.models = [{ id: "gpt-test-a", name: "A", provider: "openai" }];
   const modelPatched = await directSessionReq<{
@@ -396,12 +397,9 @@ test("lists and patches session store via sessions.* RPC", async () => {
   });
   expect(compacted.ok).toBe(true);
   expect(compacted.payload?.compacted).toBe(true);
-  const compactedLines = collectNonEmptyLines(
-    await fs.readFile(path.join(dir, "sess-main.jsonl"), "utf-8"),
-  );
-  expect(compactedLines).toHaveLength(3);
-  const filesAfterCompact = await fs.readdir(dir);
-  expectSinglePrefixedFilename(filesAfterCompact, "sess-main.jsonl.bak.");
+  expect(
+    loadSqliteSessionTranscriptEvents({ agentId: "main", sessionId: "sess-main" }),
+  ).toHaveLength(3);
 
   const deleted = await directSessionReq<{ ok: true; deleted: boolean }>("sessions.delete", {
     key: "agent:main:discord:group:dev",
@@ -412,11 +410,12 @@ test("lists and patches session store via sessions.* RPC", async () => {
     sessions: Array<{ key: string }>;
   }>("sessions.list", {});
   expect(listAfterDelete.ok).toBe(true);
-  expect(listAfterDelete.payload?.sessions.map((session) => session.key)).not.toContain(
-    "agent:main:discord:group:dev",
+  expect(
+    listAfterDelete.payload?.sessions.some((s) => s.key === "agent:main:discord:group:dev"),
+  ).toBe(false);
+  expect(loadSqliteSessionTranscriptEvents({ agentId: "main", sessionId: "sess-group" })).toEqual(
+    [],
   );
-  const filesAfterDelete = await fs.readdir(dir);
-  expectSinglePrefixedFilename(filesAfterDelete, "sess-group.jsonl.deleted.");
 
   const reset = await directSessionReq<{
     ok: true;
@@ -436,14 +435,12 @@ test("lists and patches session store via sessions.* RPC", async () => {
   expect(reset.payload?.entry.model).toBe("gpt-test-a");
   expect(reset.payload?.entry.lastAccountId).toBe("work");
   expect(reset.payload?.entry.lastThreadId).toBe("1737500000.123456");
-  const storeAfterReset = JSON.parse(await fs.readFile(storePath, "utf-8")) as Record<
-    string,
-    { lastAccountId?: string; lastThreadId?: string | number }
-  >;
-  expect(storeAfterReset["agent:main:main"]?.lastAccountId).toBe("work");
-  expect(storeAfterReset["agent:main:main"]?.lastThreadId).toBe("1737500000.123456");
-  const filesAfterReset = await fs.readdir(dir);
-  expectSinglePrefixedFilename(filesAfterReset, "sess-main.jsonl.reset.");
+  const storedAfterReset = getSessionEntry({ agentId: "main", sessionKey: "agent:main:main" });
+  expect(storedAfterReset?.lastAccountId).toBe("work");
+  expect(storedAfterReset?.lastThreadId).toBe("1737500000.123456");
+  expect(loadSqliteSessionTranscriptEvents({ agentId: "main", sessionId: "sess-main" })).toEqual(
+    [],
+  );
 
   const badThinking = await directSessionReq("sessions.patch", {
     key: "agent:main:main",
@@ -454,12 +451,7 @@ test("lists and patches session store via sessions.* RPC", async () => {
     /invalid thinkinglevel/i,
   );
 });
-
 test("sessions.list configuredAgentsOnly keeps configured-agent children and hides unrelated stores", async () => {
-  const stateDir = process.env.OPENCLAW_STATE_DIR;
-  if (!stateDir) {
-    throw new Error("OPENCLAW_STATE_DIR is required for gateway session tests");
-  }
   testState.agentsConfig = { list: [{ id: "main", default: true }] };
   const configPath = process.env.OPENCLAW_CONFIG_PATH;
   if (!configPath) {
@@ -470,65 +462,46 @@ test("sessions.list configuredAgentsOnly keeps configured-agent children and hid
     JSON.stringify({ acp: { defaultAgent: "claude", allowedAgents: ["gemini"] } }, null, 2),
     "utf-8",
   );
-  testState.sessionConfig = {
-    store: path.join(stateDir, "agents", "{agentId}", "sessions", "sessions.json"),
-  };
 
-  const mainStorePath = path.join(stateDir, "agents", "main", "sessions", "sessions.json");
-  const acpStorePath = path.join(stateDir, "agents", "claude", "sessions", "sessions.json");
-  const childStorePath = path.join(stateDir, "agents", "codex", "sessions", "sessions.json");
-  const diskOnlyStorePath = path.join(stateDir, "agents", "local", "sessions", "sessions.json");
-  await fs.mkdir(path.dirname(mainStorePath), { recursive: true });
-  await fs.mkdir(path.dirname(acpStorePath), { recursive: true });
-  await fs.mkdir(path.dirname(childStorePath), { recursive: true });
-  await fs.mkdir(path.dirname(diskOnlyStorePath), { recursive: true });
-  await fs.writeFile(
-    mainStorePath,
-    JSON.stringify({ main: { sessionId: "sess-main", updatedAt: 20 } }, null, 2),
-    "utf-8",
-  );
-  await fs.writeFile(
-    acpStorePath,
-    JSON.stringify(
-      {
-        "agent:claude:acp:25f77580-de30-4d80-9bc3-7cbc6374bce7": {
-          sessionId: "sess-claude-acp",
-          updatedAt: 30,
-          acp: {
-            backend: "acpx",
-            agent: "claude",
-            runtimeSessionName: "agent:claude:acp:25f77580-de30-4d80-9bc3-7cbc6374bce7",
-            mode: "oneshot",
-            state: "idle",
-            lastActivityAt: 30,
-          },
+  await seedGatewaySessionEntries({
+    agentId: "main",
+    entries: {
+      main: { sessionId: "sess-main", updatedAt: 20 },
+    },
+  });
+  await seedGatewaySessionEntries({
+    agentId: "claude",
+    entries: {
+      "agent:claude:acp:25f77580-de30-4d80-9bc3-7cbc6374bce7": {
+        sessionId: "sess-claude-acp",
+        updatedAt: 30,
+        acp: {
+          backend: "acpx",
+          agent: "claude",
+          runtimeSessionName: "agent:claude:acp:25f77580-de30-4d80-9bc3-7cbc6374bce7",
+          mode: "oneshot",
+          state: "idle",
+          lastActivityAt: 30,
         },
       },
-      null,
-      2,
-    ),
-    "utf-8",
-  );
-  await fs.writeFile(
-    childStorePath,
-    JSON.stringify(
-      {
-        "agent:codex:subagent:app-server-child": {
-          sessionId: "sess-codex-child",
-          updatedAt: 25,
-          spawnedBy: "agent:main:main",
-        },
+    },
+  });
+  await seedGatewaySessionEntries({
+    agentId: "codex",
+    entries: {
+      "agent:codex:subagent:app-server-child": {
+        sessionId: "sess-codex-child",
+        updatedAt: 25,
+        spawnedBy: "agent:main:main",
       },
-      null,
-      2,
-    ),
-    "utf-8",
-  );
-  await fs.writeFile(
-    diskOnlyStorePath,
-    JSON.stringify({ main: { sessionId: "sess-local", updatedAt: 10 } }, null, 2),
-    "utf-8",
-  );
+    },
+  });
+  await seedGatewaySessionEntries({
+    agentId: "local",
+    entries: {
+      main: { sessionId: "sess-local", updatedAt: 10 },
+    },
+  });
 
   const configuredOnly = await directSessionHandlerReq<{ sessions: Array<{ key: string }> }>(
     "sessions.list",

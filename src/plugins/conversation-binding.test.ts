@@ -1,18 +1,29 @@
 import fs from "node:fs";
 import path from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { executeSqliteQuerySync, getNodeSqliteKysely } from "../infra/kysely-sync.js";
 import type {
   ConversationRef,
   SessionBindingAdapter,
   SessionBindingRecord,
 } from "../infra/outbound/session-binding-service.js";
+import type { DB as OpenClawStateKyselyDatabase } from "../state/openclaw-state-db.generated.js";
+import {
+  closeOpenClawStateDatabaseForTest,
+  openOpenClawStateDatabase,
+} from "../state/openclaw-state-db.js";
 import { createEmptyPluginRegistry } from "./registry-empty.js";
 import type { PluginRegistry } from "./registry.js";
 import { cleanupTrackedTempDirs, makeTrackedTempDir } from "./test-helpers/fs-fixtures.js";
 
 const tempDirs: string[] = [];
 const tempRoot = makeTrackedTempDir("openclaw-plugin-binding", tempDirs);
-const approvalsPath = path.join(tempRoot, "plugin-binding-approvals.json");
+const stateDir = path.join(tempRoot, "state");
+const originalOpenClawStateDir = process.env.OPENCLAW_STATE_DIR;
+type ConversationBindingTestDatabase = Pick<
+  OpenClawStateKyselyDatabase,
+  "plugin_binding_approvals"
+>;
 
 const sessionBindingState = vi.hoisted(() => {
   const records = new Map<string, SessionBindingRecord>();
@@ -92,20 +103,6 @@ const pluginRuntimeState = vi.hoisted(
     }) satisfies { registry: PluginRegistry },
 );
 
-vi.mock("../infra/home-dir.js", async () => {
-  const actual =
-    await vi.importActual<typeof import("../infra/home-dir.js")>("../infra/home-dir.js");
-  return {
-    ...actual,
-    expandHomePrefix: (value: string) => {
-      if (value === "~/.openclaw/plugin-binding-approvals.json") {
-        return approvalsPath;
-      }
-      return actual.expandHomePrefix(value);
-    },
-  };
-});
-
 vi.mock("./runtime.js", async () => {
   const actual = await vi.importActual<typeof import("./runtime.js")>("./runtime.js");
   return {
@@ -118,7 +115,7 @@ vi.mock("./runtime.js", async () => {
   };
 });
 
-let testing: typeof import("./conversation-binding.js").testing;
+let __testing: typeof import("./conversation-binding.js").__testing;
 let buildPluginBindingApprovalCustomId: typeof import("./conversation-binding.js").buildPluginBindingApprovalCustomId;
 let detachPluginConversationBinding: typeof import("./conversation-binding.js").detachPluginConversationBinding;
 let getCurrentPluginConversationBinding: typeof import("./conversation-binding.js").getCurrentPluginConversationBinding;
@@ -164,12 +161,17 @@ function createAdapter(channel: string, accountId: string): SessionBindingAdapte
 }
 
 afterAll(() => {
+  if (originalOpenClawStateDir === undefined) {
+    delete process.env.OPENCLAW_STATE_DIR;
+  } else {
+    process.env.OPENCLAW_STATE_DIR = originalOpenClawStateDir;
+  }
   cleanupTrackedTempDirs(tempDirs);
 });
 
 beforeAll(async () => {
   ({
-    testing,
+    __testing,
     buildPluginBindingApprovalCustomId,
     detachPluginConversationBinding,
     getCurrentPluginConversationBinding,
@@ -282,7 +284,7 @@ async function approveBindingRequest(
 async function importDuplicateConversationBindingModules() {
   const first = await importConversationBindingModule(`first-${Date.now()}`);
   const second = await importConversationBindingModule(`second-${Date.now()}`);
-  first.testing.reset();
+  first.__testing.reset();
   return { first, second };
 }
 
@@ -415,9 +417,11 @@ async function expectResolutionDoesNotWait(params: {
 describe("plugin conversation binding approvals", () => {
   beforeEach(() => {
     sessionBindingState.reset();
-    testing.reset();
+    __testing.reset();
     setActivePluginRegistry(createEmptyPluginRegistry());
-    fs.rmSync(approvalsPath, { force: true });
+    closeOpenClawStateDatabaseForTest();
+    process.env.OPENCLAW_STATE_DIR = stateDir;
+    fs.rmSync(stateDir, { recursive: true, force: true });
     unregisterSessionBindingAdapter({ channel: "discord", accountId: "default" });
     unregisterSessionBindingAdapter({ channel: "discord", accountId: "work" });
     unregisterSessionBindingAdapter({ channel: "discord", accountId: "isolated" });
@@ -464,6 +468,23 @@ describe("plugin conversation binding approvals", () => {
     const approved = await approveBindingRequest(firstRequest.approvalId, "allow-always");
 
     expect(approved.status).toBe("approved");
+    const database = openOpenClawStateDatabase({ env: process.env });
+    const db = getNodeSqliteKysely<ConversationBindingTestDatabase>(database.db);
+    expect(
+      executeSqliteQuerySync(
+        database.db,
+        db
+          .selectFrom("plugin_binding_approvals")
+          .select(["plugin_id", "plugin_root", "channel", "account_id"]),
+      ).rows,
+    ).toEqual([
+      {
+        plugin_id: "codex",
+        plugin_root: "/plugins/codex-a",
+        channel: "discord",
+        account_id: "isolated",
+      },
+    ]);
 
     const sameScope = await requestPluginConversationBinding(
       createDiscordCodexBindRequest("channel:2", "Bind this conversation to Codex thread 456."),
@@ -506,7 +527,7 @@ describe("plugin conversation binding approvals", () => {
     expect(approved.binding.pluginRoot).toBe("/plugins/codex-a");
     expect(approved.binding.conversationId).toBe("-10099:topic:77");
 
-    second.testing.reset();
+    second.__testing.reset();
   });
 
   it("shares persistent approvals across duplicate module instances", async () => {
@@ -541,8 +562,7 @@ describe("plugin conversation binding approvals", () => {
 
     expect(rebound.status).toBe("bound");
 
-    first.testing.reset();
-    fs.rmSync(approvalsPath, { force: true });
+    first.__testing.reset();
   });
 
   it("does not share persistent approvals across plugin roots even with the same plugin id", async () => {
@@ -612,7 +632,7 @@ describe("plugin conversation binding approvals", () => {
     const data = {
       kind: "codex-app-server-session",
       version: 1,
-      sessionFile: "/tmp/openclaw/session.jsonl",
+      sessionId: "codex-session",
       workspaceDir: "/workspace/openclaw",
     };
     const binding = await requestResolvedBinding(

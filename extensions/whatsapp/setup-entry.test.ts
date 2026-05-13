@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import * as legacySessionSurfaceApi from "./legacy-session-surface-api.js";
-import * as legacyStateMigrationsApi from "./legacy-state-migrations-api.js";
+import * as doctorLegacyStateApi from "./doctor-legacy-state-api.js";
+import * as doctorSessionMigrationSurfaceApi from "./doctor-session-migration-surface-api.js";
 import setupEntry from "./setup-entry.js";
 import * as setupPluginApi from "./setup-plugin-api.js";
 
@@ -17,11 +17,11 @@ const setupEntryLoadOptions = {
     if (/[\\/]setup-plugin-api\.[jt]s$/u.test(specifier)) {
       return setupPluginApi;
     }
-    if (/[\\/]legacy-state-migrations-api\.[jt]s$/u.test(specifier)) {
-      return legacyStateMigrationsApi;
+    if (/[\\/]doctor-legacy-state-api\.[jt]s$/u.test(specifier)) {
+      return doctorLegacyStateApi;
     }
-    if (/[\\/]legacy-session-surface-api\.[jt]s$/u.test(specifier)) {
-      return legacySessionSurfaceApi;
+    if (/[\\/]doctor-session-migration-surface-api\.[jt]s$/u.test(specifier)) {
+      return doctorSessionMigrationSurfaceApi;
     }
     throw new Error(`unexpected setup entry module load: ${specifier}`);
   }) as never,
@@ -31,8 +31,8 @@ describe("whatsapp setup entry", () => {
   it("loads setup entry metadata without importing runtime dependencies", () => {
     expect(setupEntry.kind).toBe("bundled-channel-setup-entry");
     expect(setupEntry.features).toEqual({
-      legacySessionSurfaces: true,
-      legacyStateMigrations: true,
+      doctorSessionMigrationSurface: true,
+      doctorLegacyState: true,
     });
   });
 
@@ -42,29 +42,23 @@ describe("whatsapp setup entry", () => {
   });
 
   it("loads legacy setup helpers without importing runtime dependencies", () => {
-    const detectLegacyStateMigrations =
-      setupEntry.loadLegacyStateMigrationDetector?.(setupEntryLoadOptions);
-    if (!detectLegacyStateMigrations) {
+    const detectDoctorLegacyState =
+      setupEntry.loadDoctorLegacyStateDetector?.(setupEntryLoadOptions);
+    if (!detectDoctorLegacyState) {
       throw new Error("expected WhatsApp legacy state migration detector");
     }
     expect(
-      detectLegacyStateMigrations({
+      detectDoctorLegacyState({
         cfg: {},
         env: {},
         oauthDir: "/tmp/openclaw-whatsapp-empty",
         stateDir: "/tmp/openclaw-state",
       }),
     ).toStrictEqual([]);
-    const legacySessionSurface = setupEntry.loadLegacySessionSurface?.(setupEntryLoadOptions);
-    if (!legacySessionSurface) {
-      throw new Error("expected WhatsApp legacy session surface");
-    }
-    expect(Object.keys(legacySessionSurface).toSorted()).toEqual([
-      "canonicalizeLegacySessionKey",
-      "isLegacyGroupSessionKey",
-    ]);
-    expect(legacySessionSurface.canonicalizeLegacySessionKey).toBeTypeOf("function");
-    expect(legacySessionSurface.isLegacyGroupSessionKey).toBeTypeOf("function");
+    expect(setupEntry.loadDoctorSessionMigrationSurface?.(setupEntryLoadOptions)).toEqual({
+      canonicalizeLegacySessionKey: expect.any(Function),
+      isLegacyGroupSessionKey: expect.any(Function),
+    });
   });
 
   it("loads the delegated setup wizard without importing runtime dependencies", async () => {

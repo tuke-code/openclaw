@@ -421,7 +421,7 @@ function isCodexDiagnosticsUnavailableText(text: string | undefined): boolean {
   return (
     text?.startsWith("No Codex thread is attached to this OpenClaw session yet.") === true ||
     text?.startsWith(
-      "Cannot send Codex diagnostics because this command did not include an OpenClaw session file.",
+      "Cannot send Codex diagnostics because this command did not include an OpenClaw session identity.",
     ) === true
   );
 }
@@ -452,7 +452,6 @@ async function executeCodexDiagnosticsAddon(
     gatewayClientScopes: params.ctx.GatewayClientScopes,
     sessionKey: params.sessionKey,
     sessionId: targetSessionEntry?.sessionId,
-    sessionFile: targetSessionEntry?.sessionFile,
     commandBody,
     config: params.cfg,
     from: params.command.from,
@@ -491,23 +490,18 @@ function buildCodexDiagnosticsSessions(
     }
   }
   return Array.from(sessions.entries())
-    .filter(([, entry]) => Boolean(entry.sessionFile))
+    .filter(([, entry]) => Boolean(entry.sessionId))
     .map(([sessionKey, entry]) => ({
       sessionKey,
       sessionId: entry.sessionId,
-      sessionFile: entry.sessionFile,
       agentHarnessId: entry.agentHarnessId,
       channel: resolveDiagnosticsSessionChannel(entry, params, sessionKey),
       channelId: resolveDiagnosticsSessionChannelId(entry, params, sessionKey),
       accountId:
         normalizeOptionalString(entry.deliveryContext?.accountId) ??
-        normalizeOptionalString(entry.origin?.accountId) ??
-        normalizeOptionalString(entry.lastAccountId) ??
         (sessionKey === params.sessionKey ? (params.ctx.AccountId ?? undefined) : undefined),
       messageThreadId:
         entry.deliveryContext?.threadId ??
-        entry.origin?.threadId ??
-        entry.lastThreadId ??
         (sessionKey === params.sessionKey &&
         (typeof params.ctx.MessageThreadId === "string" ||
           typeof params.ctx.MessageThreadId === "number")
@@ -527,9 +521,7 @@ function resolveDiagnosticsSessionChannel(
 ): string | undefined {
   return (
     normalizeOptionalString(entry.deliveryContext?.channel) ??
-    normalizeOptionalString(entry.origin?.provider) ??
     normalizeOptionalString(entry.channel) ??
-    normalizeOptionalString(entry.lastChannel) ??
     (sessionKey === params.sessionKey ? params.command.channel : undefined)
   );
 }
@@ -539,10 +531,8 @@ function resolveDiagnosticsSessionChannelId(
   params: HandleCommandsParams,
   sessionKey: string,
 ) {
-  return (
-    normalizeOptionalString(entry.origin?.nativeChannelId) ??
-    (sessionKey === params.sessionKey ? params.command.channelId : undefined)
-  );
+  void entry;
+  return sessionKey === params.sessionKey ? params.command.channelId : undefined;
 }
 
 function formatExecToolResultForDiagnostics(result: {

@@ -1273,8 +1273,8 @@ export async function dispatchPreparedSlackMessage(prepared: PreparedSlackMessag
     const turnResult = await runPreparedInboundReplyTurn({
       channel: "slack",
       accountId: route.accountId,
+      agentId: route.agentId,
       routeSessionKey: route.sessionKey,
-      storePath: prepared.turn.storePath,
       ctxPayload: prepared.ctxPayload,
       recordInboundSession,
       record: prepared.turn.record as ChannelTurnRecordOptions,

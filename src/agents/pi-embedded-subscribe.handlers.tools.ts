@@ -1,4 +1,3 @@
-import type { AgentEvent } from "@earendil-works/pi-agent-core";
 import {
   HEARTBEAT_RESPONSE_TOOL_NAME,
   normalizeHeartbeatToolResponse,
@@ -21,7 +20,7 @@ import type { PluginHookAfterToolCallEvent } from "../plugins/types.js";
 import { createLazyImportLoader } from "../shared/lazy-promise.js";
 import { normalizeOptionalLowercaseString, readStringValue } from "../shared/string-coerce.js";
 import { truncateUtf16Safe } from "../utils.js";
-import { normalizeAcceptedSessionSpawnResult } from "./accepted-session-spawn.js";
+import type { AgentEvent } from "./agent-core-contract.js";
 import type { ApplyPatchSummary } from "./apply-patch.js";
 import type { ExecToolDetails } from "./bash-tools.exec-types.js";
 import { parseExecApprovalResultText } from "./exec-approval-result.js";
@@ -945,13 +944,6 @@ export async function handleToolExecutionEnd(
   const completedMutatingAction = !isToolError && Boolean(callSummary?.mutatingAction);
   const meta = callSummary?.meta;
   ctx.state.toolMetas.push({ toolName, meta });
-  const acceptedSessionSpawn =
-    toolName === "sessions_spawn" && !isToolError
-      ? normalizeAcceptedSessionSpawnResult(sanitizedResult)
-      : null;
-  if (acceptedSessionSpawn) {
-    ctx.state.acceptedSessionSpawns.push(acceptedSessionSpawn);
-  }
   ctx.state.toolMetaById.delete(toolCallId);
   ctx.state.toolSummaryById.delete(toolCallId);
   if (isToolError) {
@@ -985,7 +977,7 @@ export async function handleToolExecutionEnd(
       ctx.state.lastToolError = undefined;
     }
   }
-  if (completedMutatingAction || acceptedSessionSpawn) {
+  if (completedMutatingAction) {
     ctx.state.replayState = mergeEmbeddedRunReplayState(ctx.state.replayState, {
       replayInvalid: true,
       hadPotentialSideEffects: true,

@@ -5,6 +5,7 @@ import { retireSessionMcpRuntime } from "../../agents/pi-bundle-mcp-tools.js";
 import type { SkillSnapshot } from "../../agents/skills.js";
 import type { ThinkLevel } from "../../auto-reply/thinking.js";
 import type { CliDeps } from "../../cli/outbound-send-deps.js";
+import { upsertSessionEntry } from "../../config/sessions.js";
 import type { AgentDefaultsConfig } from "../../config/types.agent-defaults.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { clearAgentRunContext } from "../../infra/agent-events.js";
@@ -17,6 +18,7 @@ import {
 } from "../../infra/outbound/source-delivery-plan.js";
 import { isCommandLaneTaskTimeoutError } from "../../process/command-queue.js";
 import { CommandLane } from "../../process/lanes.js";
+import { resolveAgentIdFromSessionKey } from "../../routing/session-key.js";
 import { createLazyImportLoader } from "../../shared/lazy-promise.js";
 import { normalizeOptionalString } from "../../shared/string-coerce.js";
 import { resolveCronDeliveryPlan, type CronDeliveryPlan } from "../delivery-plan.js";
@@ -71,7 +73,6 @@ import {
   resolveHookExternalContentSource,
   isThinkingLevelSupported,
   resolveSupportedThinkingLevel,
-  resolveSessionTranscriptPath,
   resolveThinkingDefault,
   setSessionRuntimeModel,
 } from "./run.runtime.js";
@@ -80,9 +81,6 @@ import { resolveCronAgentSessionKey } from "./session-key.js";
 import { resolveCronSession } from "./session.js";
 import { resolveCronSkillsSnapshot } from "./skills-snapshot.js";
 
-const sessionStoreRuntimeLoader = createLazyImportLoader(
-  () => import("../../config/sessions/store.runtime.js"),
-);
 const cronExecutorRuntimeLoader = createLazyImportLoader(() => import("./run-executor.runtime.js"));
 const cronExternalContentRuntimeLoader = createLazyImportLoader(
   () => import("./run-external-content.runtime.js"),
@@ -101,10 +99,6 @@ const cronModelPreflightRuntimeLoader = createLazyImportLoader(
 const runtimePluginsLoader = createLazyImportLoader(
   () => import("./run-runtime-plugins.runtime.js"),
 );
-
-async function loadSessionStoreRuntime() {
-  return await sessionStoreRuntimeLoader.load();
-}
 
 async function loadCronExecutorRuntime() {
   return await cronExecutorRuntimeLoader.load();
@@ -447,7 +441,6 @@ type PreparedCronRunContext = {
   agentDir: string;
   agentSessionKey: string;
   runSessionId: string;
-  currentRunSessionId: () => string;
   runSessionKey: string;
   workspaceDir: string;
   commandBody: string;
@@ -553,10 +546,6 @@ async function prepareCronRunContext(params: {
     forceNew: input.job.sessionTarget === "isolated",
   });
   const runSessionId = cronSession.sessionEntry.sessionId;
-  const currentRunSessionId = () => cronSession.sessionEntry.sessionId ?? runSessionId;
-  if (!cronSession.sessionEntry.sessionFile?.trim()) {
-    cronSession.sessionEntry.sessionFile = resolveSessionTranscriptPath(runSessionId, agentId);
-  }
   const runSessionKey = baseSessionKey.startsWith("cron:")
     ? `${agentSessionKey}:run:${runSessionId}`
     : agentSessionKey;
@@ -564,14 +553,17 @@ async function prepareCronRunContext(params: {
     isFastTestEnv: params.isFastTestEnv,
     cronSession,
     agentSessionKey,
-    updateSessionStore: async (storePath, update) => {
-      const { updateSessionStore } = await loadSessionStoreRuntime();
-      await updateSessionStore(storePath, update);
+    persistSessionRow: async (sessionKey, entry) => {
+      upsertSessionEntry({
+        agentId: resolveAgentIdFromSessionKey(sessionKey),
+        sessionKey,
+        entry,
+      });
     },
   });
   const withRunSession: WithRunSession = (result) => ({
     ...result,
-    sessionId: currentRunSessionId(),
+    sessionId: cronSession.sessionEntry.sessionId ?? runSessionId,
     sessionKey: runSessionKey,
   });
   if (!cronSession.sessionEntry.label?.trim() && baseSessionKey.startsWith("cron:")) {
@@ -787,7 +779,6 @@ async function prepareCronRunContext(params: {
           sessionEntry: cronSession.sessionEntry,
           sessionStore: cronSession.store,
           sessionKey: agentSessionKey,
-          storePath: cronSession.storePath,
           isNewSession: cronSession.isNewSession && input.job.sessionTarget !== "isolated",
         });
   const liveSelection: CronLiveSelection = {
@@ -809,7 +800,6 @@ async function prepareCronRunContext(params: {
       agentDir,
       agentSessionKey,
       runSessionId,
-      currentRunSessionId,
       runSessionKey,
       workspaceDir,
       commandBody,
@@ -1038,7 +1028,7 @@ async function finalizeCronRun(params: {
     agentId: prepared.agentId,
     agentSessionKey: prepared.agentSessionKey,
     runSessionKey: prepared.runSessionKey,
-    sessionId: prepared.currentRunSessionId(),
+    sessionId: prepared.runSessionId,
     runStartedAt: execution.runStartedAt,
     runEndedAt: execution.runEndedAt,
     timeoutMs: prepared.timeoutMs,
@@ -1159,7 +1149,7 @@ export async function runCronIsolatedAgentTurn(params: {
     params.onExecutionStarted?.({
       jobId: params.job.id,
       agentId: prepared.context.agentId,
-      sessionId: prepared.context.currentRunSessionId(),
+      sessionId: prepared.context.runSessionId,
       sessionKey: prepared.context.runSessionKey,
       phase: "runner_entered",
       provider: prepared.context.liveSelection.provider,
@@ -1172,7 +1162,7 @@ export async function runCronIsolatedAgentTurn(params: {
     params.onExecutionPhase?.({
       jobId: params.job.id,
       agentId: prepared.context.agentId,
-      sessionId: prepared.context.currentRunSessionId(),
+      sessionId: prepared.context.runSessionId,
       sessionKey: prepared.context.runSessionKey,
       provider: prepared.context.liveSelection.provider,
       model: prepared.context.liveSelection.model,

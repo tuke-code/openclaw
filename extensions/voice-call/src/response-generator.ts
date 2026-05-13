@@ -6,6 +6,7 @@
 import crypto from "node:crypto";
 import { applyModelOverrideToSessionEntry } from "openclaw/plugin-sdk/model-session-runtime";
 import { normalizeLowercaseStringOrEmpty } from "openclaw/plugin-sdk/string-coerce-runtime";
+import type { SessionEntry } from "../api.js";
 import { resolveVoiceCallSessionKey, type VoiceCallConfig } from "./config.js";
 import type { CoreAgentDeps, CoreConfig } from "./core-bridge.js";
 import { resolveVoiceResponseModel } from "./response-model.js";
@@ -242,7 +243,6 @@ export async function generateVoiceResponse(
   const toolsAllow = resolveVoiceAgentToolsAllow(cfg, agentId);
 
   // Resolve paths
-  const storePath = agentRuntime.session.resolveStorePath(cfg.session?.store, { agentId });
   const agentDir = agentRuntime.resolveAgentDir(cfg, agentId);
   const workspaceDir = agentRuntime.resolveAgentWorkspaceDir(cfg, agentId);
 
@@ -252,7 +252,7 @@ export async function generateVoiceResponse(
   // Load or create session entry
   const now = Date.now();
   const existingSessionEntry = agentRuntime.session.getSessionEntry({
-    storePath,
+    agentId,
     sessionKey: resolvedSessionKey,
   });
 
@@ -261,42 +261,28 @@ export async function generateVoiceResponse(
 
   let sessionEntry = existingSessionEntry;
   if (!sessionEntry?.sessionId || voiceConfig.responseModel) {
-    sessionEntry =
-      (await agentRuntime.session.patchSessionEntry({
-        storePath,
-        sessionKey: resolvedSessionKey,
-        replaceEntry: true,
-        fallbackEntry: sessionEntry ?? {
+    const entry: SessionEntry = sessionEntry?.sessionId
+      ? { ...sessionEntry }
+      : {
+          ...sessionEntry,
           sessionId: crypto.randomUUID(),
           updatedAt: now,
-        },
-        update: (entry) => {
-          const next = entry.sessionId
-            ? { ...entry }
-            : {
-                ...entry,
-                sessionId: crypto.randomUUID(),
-                updatedAt: now,
-              };
-          if (voiceConfig.responseModel) {
-            applyModelOverrideToSessionEntry({
-              entry: next,
-              selection: { provider, model },
-              selectionSource: "auto",
-            });
-          }
-          return next;
-        },
-      })) ?? undefined;
-  }
-  if (!sessionEntry?.sessionId) {
-    return { text: null, error: "Voice response session could not be initialized" };
+        };
+    if (voiceConfig.responseModel) {
+      applyModelOverrideToSessionEntry({
+        entry,
+        selection: { provider, model },
+        selectionSource: "auto",
+      });
+    }
+    agentRuntime.session.upsertSessionEntry({
+      agentId,
+      sessionKey: resolvedSessionKey,
+      entry,
+    });
+    sessionEntry = entry;
   }
   const sessionId = sessionEntry.sessionId;
-
-  const sessionFile = agentRuntime.session.resolveSessionFilePath(sessionId, sessionEntry, {
-    agentId,
-  });
 
   // Resolve thinking level
   const thinkLevel = agentRuntime.resolveThinkingDefault({ cfg, provider, model });
@@ -330,7 +316,6 @@ export async function generateVoiceResponse(
       sandboxSessionKey: resolveVoiceSandboxSessionKey(agentId, resolvedSessionKey),
       agentId,
       messageProvider: "voice",
-      sessionFile,
       workspaceDir,
       config: cfg,
       prompt: userMessage,

@@ -776,8 +776,8 @@ export async function processDiscordMessage(
     const preparedResult = await runPreparedInboundReplyTurn({
       channel: "discord",
       accountId: route.accountId,
+      agentId: route.agentId,
       routeSessionKey: persistedSessionKey,
-      storePath: turn.storePath,
       ctxPayload,
       recordInboundSession,
       record: turn.record,

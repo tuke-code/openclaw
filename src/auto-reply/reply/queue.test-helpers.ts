@@ -35,7 +35,6 @@ export function createQueueTestRun(params: {
       agentId: "agent",
       agentDir: "/tmp",
       sessionId: "sess",
-      sessionFile: "/tmp/session.json",
       workspaceDir: "/tmp",
       config: {} as OpenClawConfig,
       provider: "openai",

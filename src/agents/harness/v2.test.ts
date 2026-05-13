@@ -1,4 +1,3 @@
-import type { Api, Model } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PI_EMBEDDED_CONTEXT_ENGINE_HOST } from "../../context-engine/host-compat.js";
 import type { ContextEngine } from "../../context-engine/types.js";
@@ -8,6 +7,7 @@ import {
   type DiagnosticEventMetadata,
   type DiagnosticEventPayload,
 } from "../../infra/diagnostic-events.js";
+import type { Api, Model } from "../pi-ai-contract.js";
 import type { EmbeddedRunAttemptResult } from "../pi-embedded-runner/run/types.js";
 import { createPiAgentHarness } from "./builtin-pi.js";
 import type { AgentHarness, AgentHarnessAttemptParams } from "./types.js";
@@ -20,7 +20,6 @@ function createAttemptParams(): AgentHarnessAttemptParams {
     sessionId: "session-1",
     sessionKey: "session-key",
     runId: "run-1",
-    sessionFile: "/tmp/session.jsonl",
     workspaceDir: "/tmp/workspace",
     timeoutMs: 5_000,
     provider: "codex",
@@ -599,7 +598,6 @@ describe("AgentHarness V2 compatibility adapter", () => {
     await expect(
       v2.compact?.({
         sessionId: "session-1",
-        sessionFile: "/tmp/session.jsonl",
         workspaceDir: "/tmp/workspace",
       }),
     ).resolves.toHaveProperty("compacted", true);

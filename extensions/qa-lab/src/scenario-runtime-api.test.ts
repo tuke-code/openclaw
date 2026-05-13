@@ -47,12 +47,7 @@ function createDeps(overrides?: Partial<QaScenarioRuntimeDeps>): QaScenarioRunti
     createSession: fn,
     readEffectiveTools: fn,
     readSkillStatus: fn,
-    readRawQaSessionStore: fn,
-    readGatewayLogs: fn,
-    markGatewayLogCursor: fn,
-    scanGatewayLogSentinels: fn,
-    assertNoGatewayLogSentinels: fn,
-    readSessionTranscriptSummary: fn,
+    readRawQaSessionEntries: fn,
     runQaCli: fn,
     extractMediaPathFromText: fn,
     resolveGeneratedImagePath: fn,
@@ -72,7 +67,6 @@ function createDeps(overrides?: Partial<QaScenarioRuntimeDeps>): QaScenarioRunti
     runRuntimeToolFixture: fn,
     extractQaToolPayload: fn,
     formatMemoryDreamingDay: fn,
-    resolveSessionTranscriptsDirForAgent: fn,
     buildAgentSessionKey: fn,
     normalizeLowercaseStringOrEmpty: fn,
     formatErrorMessage: fn,
@@ -161,9 +155,6 @@ describe("createQaScenarioRuntimeApi", () => {
     expect(api.config).toEqual({ expected: "value" });
     expect(api.waitForCondition).toBe(waitForCondition);
     expect(api.waitForChannelReady).toBe(api.waitForTransportReady);
-    expect(api.markGatewayLogCursor).toBe(deps.markGatewayLogCursor);
-    expect(api.assertNoGatewayLogSentinels).toBe(deps.assertNoGatewayLogSentinels);
-    expect(api.readSessionTranscriptSummary).toBe(deps.readSessionTranscriptSummary);
     for (const toolName of browserAndWebRuntimeTools) {
       expect(api[toolName]).toBe(deps[toolName]);
     }

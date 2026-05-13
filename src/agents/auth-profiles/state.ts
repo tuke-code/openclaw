@@ -1,159 +1,59 @@
-import fs from "node:fs";
-import { loadJsonFile, saveJsonFile } from "../../infra/json-file.js";
 import { normalizeOptionalString } from "../../shared/string-coerce.js";
-import { normalizeProviderId } from "../provider-id.js";
-import { AUTH_STORE_VERSION } from "./constants.js";
-import { resolveAuthStatePath } from "./paths.js";
 import type {
-  AuthProfileBlockedReason,
-  AuthProfileBlockedSource,
-  AuthProfileFailureReason,
-  AuthProfileState,
-  AuthProfileStateStore,
-  ProfileUsageStats,
-} from "./types.js";
+  OpenClawStateDatabase,
+  OpenClawStateDatabaseOptions,
+} from "../../state/openclaw-state-db.js";
+import { AUTH_STORE_VERSION } from "./constants.js";
+import { resolveAuthProfileStoreKey } from "./paths.js";
+import {
+  deleteAuthProfileStatePayload,
+  deleteAuthProfileStatePayloadInTransaction,
+  readAuthProfileStatePayloadResult,
+  readAuthProfileStatePayloadResultFromDatabase,
+  writeAuthProfileStatePayload as writeAuthProfileStatePayloadToSqlite,
+  writeAuthProfileStatePayloadInTransaction,
+  type AuthProfilePayloadValue,
+} from "./sqlite-storage.js";
+import type { AuthProfileState, AuthProfileStateStore, ProfileUsageStats } from "./types.js";
 
-const AUTH_FAILURE_REASONS = new Set<AuthProfileFailureReason>([
-  "auth",
-  "auth_permanent",
-  "format",
-  "overloaded",
-  "rate_limit",
-  "billing",
-  "timeout",
-  "model_not_found",
-  "session_expired",
-  "empty_response",
-  "no_error_details",
-  "unclassified",
-  "unknown",
-]);
-const AUTH_BLOCKED_REASONS = new Set<AuthProfileBlockedReason>(["subscription_limit"]);
-const AUTH_BLOCKED_SOURCES = new Set<AuthProfileBlockedSource>(["codex_rate_limits", "wham"]);
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === "object" && !Array.isArray(value);
-}
-
-function normalizeFiniteNumber(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
-}
-
-function normalizeEnumValue<T extends string>(value: unknown, allowed: Set<T>): T | undefined {
-  if (typeof value !== "string") {
-    return undefined;
-  }
-  return allowed.has(value as T) ? (value as T) : undefined;
-}
-
-function normalizeFailureCounts(raw: unknown): ProfileUsageStats["failureCounts"] {
-  if (!isRecord(raw)) {
-    return undefined;
-  }
-  const normalized: NonNullable<ProfileUsageStats["failureCounts"]> = {};
-  for (const [reason, count] of Object.entries(raw)) {
-    if (!AUTH_FAILURE_REASONS.has(reason as AuthProfileFailureReason)) {
-      continue;
-    }
-    if (typeof count !== "number" || !Number.isFinite(count) || count <= 0) {
-      continue;
-    }
-    normalized[reason as AuthProfileFailureReason] = Math.trunc(count);
-  }
-  return Object.keys(normalized).length > 0 ? normalized : undefined;
+export function authProfileStateKey(agentDir?: string): string {
+  return resolveAuthProfileStoreKey(agentDir);
 }
 
 function normalizeAuthProfileOrder(raw: unknown): AuthProfileState["order"] {
-  if (!isRecord(raw)) {
+  if (!raw || typeof raw !== "object") {
     return undefined;
   }
-  const normalized = Object.entries(raw).reduce<Record<string, string[]>>(
-    (acc, [provider, value]) => {
-      if (!Array.isArray(value)) {
-        return acc;
-      }
-      const providerKey = normalizeProviderId(provider);
-      if (!providerKey) {
-        return acc;
-      }
-      const list = value.map((entry) => normalizeOptionalString(entry) ?? "").filter(Boolean);
-      if (list.length > 0) {
-        acc[providerKey] = list;
-      }
+  const normalized = Object.entries(raw as Record<string, unknown>).reduce<
+    Record<string, string[]>
+  >((acc, [provider, value]) => {
+    if (!Array.isArray(value)) {
       return acc;
-    },
-    {},
-  );
-  return Object.keys(normalized).length > 0 ? normalized : undefined;
-}
-
-function normalizeLastGood(raw: unknown): AuthProfileState["lastGood"] {
-  if (!isRecord(raw)) {
-    return undefined;
-  }
-  const normalized: Record<string, string> = {};
-  for (const [provider, profileId] of Object.entries(raw)) {
-    const providerKey = normalizeProviderId(provider);
-    const normalizedProfileId = normalizeOptionalString(profileId);
-    if (!providerKey || !normalizedProfileId) {
-      continue;
     }
-    normalized[providerKey] = normalizedProfileId;
-  }
-  return Object.keys(normalized).length > 0 ? normalized : undefined;
-}
-
-function normalizeUsageStatsEntry(raw: unknown): ProfileUsageStats | undefined {
-  if (!isRecord(raw)) {
-    return undefined;
-  }
-  const stats: ProfileUsageStats = {
-    lastUsed: normalizeFiniteNumber(raw.lastUsed),
-    blockedUntil: normalizeFiniteNumber(raw.blockedUntil),
-    blockedReason: normalizeEnumValue(raw.blockedReason, AUTH_BLOCKED_REASONS),
-    blockedSource: normalizeEnumValue(raw.blockedSource, AUTH_BLOCKED_SOURCES),
-    blockedModel: normalizeOptionalString(raw.blockedModel),
-    cooldownUntil: normalizeFiniteNumber(raw.cooldownUntil),
-    cooldownReason: normalizeEnumValue(raw.cooldownReason, AUTH_FAILURE_REASONS),
-    cooldownModel: normalizeOptionalString(raw.cooldownModel),
-    disabledUntil: normalizeFiniteNumber(raw.disabledUntil),
-    disabledReason: normalizeEnumValue(raw.disabledReason, AUTH_FAILURE_REASONS),
-    errorCount: normalizeFiniteNumber(raw.errorCount),
-    failureCounts: normalizeFailureCounts(raw.failureCounts),
-    lastFailureAt: normalizeFiniteNumber(raw.lastFailureAt),
-  };
-  for (const key of Object.keys(stats) as Array<keyof ProfileUsageStats>) {
-    if (stats[key] === undefined) {
-      delete stats[key];
+    const list = value.map((entry) => normalizeOptionalString(entry) ?? "").filter(Boolean);
+    if (list.length > 0) {
+      acc[provider] = list;
     }
-  }
-  return Object.keys(stats).length > 0 ? stats : undefined;
-}
-
-function normalizeUsageStats(raw: unknown): AuthProfileState["usageStats"] {
-  if (!isRecord(raw)) {
-    return undefined;
-  }
-  const normalized: Record<string, ProfileUsageStats> = {};
-  for (const [profileId, value] of Object.entries(raw)) {
-    const normalizedProfileId = normalizeOptionalString(profileId);
-    const stats = normalizeUsageStatsEntry(value);
-    if (!normalizedProfileId || !stats) {
-      continue;
-    }
-    normalized[normalizedProfileId] = stats;
-  }
+    return acc;
+  }, {});
   return Object.keys(normalized).length > 0 ? normalized : undefined;
 }
 
 export function coerceAuthProfileState(raw: unknown): AuthProfileState {
-  if (!isRecord(raw)) {
+  if (!raw || typeof raw !== "object") {
     return {};
   }
+  const record = raw as Record<string, unknown>;
   return {
-    order: normalizeAuthProfileOrder(raw.order),
-    lastGood: normalizeLastGood(raw.lastGood),
-    usageStats: normalizeUsageStats(raw.usageStats),
+    order: normalizeAuthProfileOrder(record.order),
+    lastGood:
+      record.lastGood && typeof record.lastGood === "object"
+        ? (record.lastGood as Record<string, string>)
+        : undefined,
+    usageStats:
+      record.usageStats && typeof record.usageStats === "object"
+        ? (record.usageStats as Record<string, ProfileUsageStats>)
+        : undefined,
   };
 }
 
@@ -181,11 +81,43 @@ export function mergeAuthProfileState(
   };
 }
 
-export function loadPersistedAuthProfileState(agentDir?: string): AuthProfileState {
-  return coerceAuthProfileState(loadJsonFile(resolveAuthStatePath(agentDir)));
+function authProfileStateToPayloadValue(state: AuthProfileStateStore): AuthProfilePayloadValue {
+  return state as AuthProfilePayloadValue;
 }
 
-function buildPersistedAuthProfileState(store: AuthProfileState): AuthProfileStateStore | null {
+function writeAuthProfileStatePayload(key: string, payload: AuthProfileStateStore): void {
+  writeAuthProfileStatePayloadToSqlite(key, authProfileStateToPayloadValue(payload));
+}
+
+export function loadPersistedAuthProfileState(
+  agentDir?: string,
+  options: OpenClawStateDatabaseOptions = {},
+): AuthProfileState {
+  const key = authProfileStateKey(agentDir);
+  const sqliteState = readAuthProfileStatePayloadResult(key, options);
+  if (sqliteState.exists && sqliteState.value !== undefined) {
+    return coerceAuthProfileState(sqliteState.value);
+  }
+
+  return {};
+}
+
+export function loadPersistedAuthProfileStateFromDatabase(
+  database: OpenClawStateDatabase,
+  agentDir?: string,
+): AuthProfileState {
+  const key = authProfileStateKey(agentDir);
+  const sqliteState = readAuthProfileStatePayloadResultFromDatabase(database, key);
+  if (sqliteState.exists && sqliteState.value !== undefined) {
+    return coerceAuthProfileState(sqliteState.value);
+  }
+
+  return {};
+}
+
+export function buildPersistedAuthProfileState(
+  store: AuthProfileState,
+): AuthProfileStateStore | null {
   const state = coerceAuthProfileState(store);
   if (!state.order && !state.lastGood && !state.usageStats) {
     return null;
@@ -202,18 +134,45 @@ export function savePersistedAuthProfileState(
   store: AuthProfileState,
   agentDir?: string,
 ): AuthProfileStateStore | null {
-  const payload = buildPersistedAuthProfileState(store);
-  const statePath = resolveAuthStatePath(agentDir);
+  return savePersistedAuthProfileStatePayload({
+    store,
+    key: authProfileStateKey(agentDir),
+    write: (key, payload) => writeAuthProfileStatePayload(key, payload),
+    delete: (key) => deleteAuthProfileStatePayload(key),
+  });
+}
+
+export function savePersistedAuthProfileStateInTransaction(
+  database: OpenClawStateDatabase,
+  store: AuthProfileState,
+  agentDir?: string,
+  updatedAt: number = Date.now(),
+): AuthProfileStateStore | null {
+  return savePersistedAuthProfileStatePayload({
+    store,
+    key: authProfileStateKey(agentDir),
+    write: (key, payload) =>
+      writeAuthProfileStatePayloadInTransaction(
+        database,
+        key,
+        authProfileStateToPayloadValue(payload),
+        updatedAt,
+      ),
+    delete: (key) => deleteAuthProfileStatePayloadInTransaction(database, key),
+  });
+}
+
+function savePersistedAuthProfileStatePayload(params: {
+  store: AuthProfileState;
+  key: string;
+  write: (key: string, payload: AuthProfileStateStore) => void;
+  delete: (key: string) => void;
+}): AuthProfileStateStore | null {
+  const payload = buildPersistedAuthProfileState(params.store);
   if (!payload) {
-    try {
-      fs.unlinkSync(statePath);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") {
-        throw error;
-      }
-    }
+    params.delete(params.key);
     return null;
   }
-  saveJsonFile(statePath, payload);
+  params.write(params.key, payload);
   return payload;
 }

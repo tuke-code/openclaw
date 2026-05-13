@@ -1,6 +1,6 @@
-import type { Api, Model } from "@earendil-works/pi-ai";
-import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
+import type { ModelRegistry } from "../../agents/model-registry-contract.js";
 import { parseModelRef } from "../../agents/model-selection.js";
+import type { Api, Model } from "../../agents/pi-ai-contract.js";
 import { loadManifestMetadataSnapshot } from "../../plugins/manifest-contract-eligibility.js";
 import type { RuntimeEnv } from "../../runtime.js";
 import { createLazyImportLoader } from "../../shared/lazy-promise.js";

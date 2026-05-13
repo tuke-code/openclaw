@@ -23,10 +23,6 @@ type AuthProfileOrderConfig = Parameters<
 export type CodexControlRequestOptions = {
   config?: AuthProfileOrderConfig;
   authProfileId?: string;
-  agentDir?: string;
-  sessionKey?: string;
-  sessionId?: string;
-  isolated?: boolean;
 };
 
 export function requestOptions(
@@ -70,11 +66,7 @@ export async function codexControlRequest(
     timeoutMs: runtime.requestTimeoutMs,
     startOptions: runtime.start,
     config: options.config,
-    sessionKey: options.sessionKey,
-    sessionId: options.sessionId,
     authProfileId: options.authProfileId,
-    agentDir: options.agentDir,
-    isolated: options.isolated,
   });
 }
 

@@ -13,19 +13,11 @@ export const DEFAULT_SILENT_REPLY_POLICY: Record<SilentReplyConversationType, Si
 };
 
 export function classifySilentReplyConversationType(params: {
-  sessionKey?: string;
   surface?: string;
   conversationType?: SilentReplyConversationType;
 }): SilentReplyConversationType {
   if (params.conversationType) {
     return params.conversationType;
-  }
-  const normalizedSessionKey = normalizeLowercaseStringOrEmpty(params.sessionKey);
-  if (normalizedSessionKey.includes(":group:") || normalizedSessionKey.includes(":channel:")) {
-    return "group";
-  }
-  if (normalizedSessionKey.includes(":direct:") || normalizedSessionKey.includes(":dm:")) {
-    return "direct";
   }
   const normalizedSurface = normalizeLowercaseStringOrEmpty(params.surface);
   if (normalizedSurface === "webchat") {

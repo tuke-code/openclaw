@@ -14,12 +14,15 @@ import { startOrResumeThread } from "./thread-lifecycle.js";
 
 let tempDir: string;
 
-function createParams(sessionFile: string, workspaceDir: string): EmbeddedRunAttemptParams {
+function testSessionId(suffix = "session-1"): string {
+  return suffix;
+}
+
+function createParams(sessionId: string, workspaceDir: string): EmbeddedRunAttemptParams {
   return {
     prompt: "hello",
-    sessionId: "session-1",
-    sessionKey: "agent:main:session-1",
-    sessionFile,
+    sessionKey: `agent:main:${sessionId}`,
+    sessionId,
     workspaceDir,
     runId: "run-1",
     provider: "codex",
@@ -97,7 +100,7 @@ describe("Codex app-server dynamic tool schema boundary contract", () => {
   });
 
   it("passes prepared executable dynamic tool schemas through thread start unchanged", async () => {
-    const sessionFile = path.join(tempDir, "session.jsonl");
+    const sessionId = testSessionId();
     const workspaceDir = path.join(tempDir, "workspace");
     const parameterFreeTool = createParameterFreeTool("message");
     const dynamicTool = {
@@ -114,7 +117,7 @@ describe("Codex app-server dynamic tool schema boundary contract", () => {
 
     await startOrResumeThread({
       client: { request } as never,
-      params: createParams(sessionFile, workspaceDir),
+      params: createParams(sessionId, workspaceDir),
       cwd: workspaceDir,
       dynamicTools: [dynamicTool],
       appServer: createAppServerOptions(),
@@ -141,7 +144,7 @@ describe("Codex app-server dynamic tool schema boundary contract", () => {
   });
 
   it("accepts Codex app-server priority service tier responses", async () => {
-    const sessionFile = path.join(tempDir, "session.jsonl");
+    const sessionId = "session";
     const workspaceDir = path.join(tempDir, "workspace");
     const request = vi.fn(async (method: string) => {
       if (method === "thread/start") {
@@ -152,7 +155,7 @@ describe("Codex app-server dynamic tool schema boundary contract", () => {
 
     const binding = await startOrResumeThread({
       client: { request } as never,
-      params: createParams(sessionFile, workspaceDir),
+      params: createParams(sessionId, workspaceDir),
       cwd: workspaceDir,
       dynamicTools: [],
       appServer: createAppServerOptions(),
@@ -162,7 +165,7 @@ describe("Codex app-server dynamic tool schema boundary contract", () => {
   });
 
   it("treats dynamic tool schema changes as thread-fingerprint changes", async () => {
-    const sessionFile = path.join(tempDir, "session.jsonl");
+    const sessionId = testSessionId("session-dynamic-tool-change");
     const workspaceDir = path.join(tempDir, "workspace");
     const appServer = createAppServerOptions();
     let nextThreadId = 1;
@@ -175,7 +178,7 @@ describe("Codex app-server dynamic tool schema boundary contract", () => {
 
     await startOrResumeThread({
       client: { request } as never,
-      params: createParams(sessionFile, workspaceDir),
+      params: createParams(sessionId, workspaceDir),
       cwd: workspaceDir,
       dynamicTools: [
         {
@@ -189,7 +192,7 @@ describe("Codex app-server dynamic tool schema boundary contract", () => {
     const permissiveTool = createPermissiveTool("message");
     await startOrResumeThread({
       client: { request } as never,
-      params: createParams(sessionFile, workspaceDir),
+      params: createParams(sessionId, workspaceDir),
       cwd: workspaceDir,
       dynamicTools: [
         {

@@ -34,7 +34,7 @@ export type ResolvedQmdCollection = {
   name: string;
   path: string;
   pattern: string;
-  kind: "memory" | "custom" | "sessions";
+  kind: "memory" | "custom";
 };
 
 export type ResolvedQmdUpdateConfig = {
@@ -57,12 +57,6 @@ export type ResolvedQmdLimitsConfig = {
   timeoutMs: number;
 };
 
-export type ResolvedQmdSessionConfig = {
-  enabled: boolean;
-  exportDir?: string;
-  retentionDays?: number;
-};
-
 export type ResolvedQmdMcporterConfig = {
   enabled: boolean;
   serverName: string;
@@ -75,7 +69,6 @@ export type ResolvedQmdConfig = {
   searchMode: MemoryQmdSearchMode;
   searchTool?: string;
   collections: ResolvedQmdCollection[];
-  sessions: ResolvedQmdSessionConfig;
   update: ResolvedQmdUpdateConfig;
   limits: ResolvedQmdLimitsConfig;
   includeDefaultMemory: boolean;
@@ -262,22 +255,6 @@ function resolveSearchTool(raw?: MemoryQmdConfig["searchTool"]): string | undefi
   return value ? value : undefined;
 }
 
-function resolveSessionConfig(
-  cfg: MemoryQmdConfig["sessions"],
-  workspaceDir: string,
-): ResolvedQmdSessionConfig {
-  const enabled = Boolean(cfg?.enabled);
-  const exportDirRaw = cfg?.exportDir?.trim();
-  const exportDir = exportDirRaw ? resolvePath(exportDirRaw, workspaceDir) : undefined;
-  const retentionDays =
-    cfg?.retentionDays && cfg.retentionDays > 0 ? Math.floor(cfg.retentionDays) : undefined;
-  return {
-    enabled,
-    exportDir,
-    retentionDays,
-  };
-}
-
 function resolveCustomPaths(
   rawPaths: MemoryQmdIndexPath[] | undefined,
   workspaceDir: string,
@@ -437,7 +414,6 @@ export function resolveMemoryBackendConfig(params: {
     searchTool: resolveSearchTool(qmdCfg?.searchTool),
     collections,
     includeDefaultMemory,
-    sessions: resolveSessionConfig(qmdCfg?.sessions, workspaceDir),
     update: {
       intervalMs: resolveIntervalMs(qmdCfg?.update?.interval),
       debounceMs: resolveDebounceMs(qmdCfg?.update?.debounceMs),

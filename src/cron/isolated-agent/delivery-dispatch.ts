@@ -776,7 +776,7 @@ export async function dispatchCronDelivery(
       ...params.telemetry,
     });
   const cleanupDirectCronSessionIfNeeded = async (): Promise<void> => {
-    if (directCronSessionDeleted) {
+    if (!params.job.deleteAfterRun || directCronSessionDeleted) {
       return;
     }
     directCronSessionDeleted = true;

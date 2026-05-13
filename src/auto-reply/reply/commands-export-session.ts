@@ -2,12 +2,14 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  migrateSessionEntries,
-  type FileEntry as PiSessionFileEntry,
   type SessionEntry as PiSessionEntry,
   type SessionHeader,
-} from "@earendil-works/pi-coding-agent";
-import { pathExists } from "../../infra/fs-safe.js";
+  type TranscriptEntry,
+} from "../../agents/transcript/session-transcript-contract.js";
+import {
+  hasSqliteSessionTranscriptEvents,
+  loadSqliteSessionTranscriptEvents,
+} from "../../config/sessions/transcript-store.sqlite.js";
 import type { ReplyPayload } from "../types.js";
 import {
   isReplyPayload,
@@ -27,17 +29,6 @@ interface SessionData {
   systemPrompt?: string;
   tools?: Array<{ name: string; description?: string; parameters?: unknown }>;
 }
-
-type SessionExportJsonlWarning = {
-  code: "invalid-session-json" | "invalid-session-row";
-  row: number;
-};
-
-type SessionExportWarningSummary = {
-  code: SessionExportJsonlWarning["code"];
-  count: number;
-  rows: number[];
-};
 
 async function loadTemplate(fileName: string): Promise<string> {
   return await fsp.readFile(path.join(EXPORT_HTML_DIR, fileName), "utf-8");
@@ -71,7 +62,7 @@ async function generateHtml(sessionData: SessionData): Promise<string> {
     loadTemplate(path.join("vendor", "highlight.min.js")),
   ]);
 
-  // Use pi-mono dark theme colors (matching their theme/dark.json)
+  // Keep the exported transcript palette aligned with OpenClaw's dark TUI theme.
   const themeVars = `
     --cyan: #00d7ff;
     --blue: #5f87ff;
@@ -155,104 +146,38 @@ async function writeNewDefaultExportFile(filePath: string, html: string): Promis
   }
   throw new Error(`Could not find an unused export filename near ${filePath}`);
 }
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-function isSessionFileEntry(value: unknown): value is PiSessionFileEntry {
-  if (!isRecord(value) || typeof value.type !== "string") {
+function hasScopedSqliteTranscriptEvents(params: { agentId: string; sessionId: string }): boolean {
+  try {
+    return hasSqliteSessionTranscriptEvents(params);
+  } catch {
     return false;
   }
-  if (value.type !== "message") {
-    return true;
-  }
-  const message = value.message;
-  return isRecord(message) && typeof message.role === "string";
 }
 
-function parseSessionEntriesWithWarnings(content: string): {
-  entries: PiSessionFileEntry[];
-  warnings: SessionExportJsonlWarning[];
-} {
-  const entries: PiSessionFileEntry[] = [];
-  const warnings: SessionExportJsonlWarning[] = [];
-  const rows = content.split(/\r?\n/u);
-  for (const [index, rawLine] of rows.entries()) {
-    const line = rawLine.trim();
-    if (!line) {
-      continue;
-    }
-    try {
-      const parsed = JSON.parse(line) as unknown;
-      if (!isSessionFileEntry(parsed)) {
-        warnings.push({ code: "invalid-session-row", row: index + 1 });
-        continue;
-      }
-      entries.push(parsed);
-    } catch {
-      warnings.push({ code: "invalid-session-json", row: index + 1 });
-    }
-  }
-  return { entries, warnings };
-}
-
-function summarizeSessionExportWarnings(
-  warnings: SessionExportJsonlWarning[],
-): SessionExportWarningSummary[] {
-  const summaries = new Map<SessionExportJsonlWarning["code"], SessionExportWarningSummary>();
-  for (const warning of warnings) {
-    const summary = summaries.get(warning.code);
-    if (summary) {
-      summary.count += 1;
-      if (summary.rows.length < 20) {
-        summary.rows.push(warning.row);
-      }
-      continue;
-    }
-    summaries.set(warning.code, {
-      code: warning.code,
-      count: 1,
-      rows: [warning.row],
-    });
-  }
-  return [...summaries.values()];
-}
-
-function formatSkippedRows(count: number): string {
-  return `${count.toLocaleString()} malformed transcript ${count === 1 ? "row" : "rows"}`;
-}
-
-function formatSessionExportWarning(summary: SessionExportWarningSummary): string {
-  const rows = summary.rows.length > 0 ? ` rows ${summary.rows.join(", ")}` : "";
-  const verb = summary.count === 1 ? "was" : "were";
-  switch (summary.code) {
-    case "invalid-session-json":
-      return `⚠️ Skipped ${formatSkippedRows(summary.count)} that ${verb} not valid JSON.${rows}`;
-    case "invalid-session-row":
-      return summary.count === 1
-        ? `⚠️ Skipped ${formatSkippedRows(summary.count)} that was not a session entry.${rows}`
-        : `⚠️ Skipped ${formatSkippedRows(summary.count)} that were not session entries.${rows}`;
-  }
-  const unreachable: never = summary.code;
-  return unreachable;
-}
-
-async function readSessionDataFromTranscript(sessionFile: string): Promise<{
+async function readSessionDataFromTranscript(params: {
+  agentId: string;
+  sessionId: string;
+}): Promise<{
   header: SessionHeader | null;
   entries: PiSessionEntry[];
   leafId: string | null;
-  warnings: SessionExportWarningSummary[];
 }> {
-  const raw = await fsp.readFile(sessionFile, "utf-8");
-  const { entries: fileEntries, warnings } = parseSessionEntriesWithWarnings(raw);
-  migrateSessionEntries(fileEntries);
+  if (!hasScopedSqliteTranscriptEvents(params)) {
+    throw new Error(
+      `Transcript is not in SQLite for agent ${params.agentId} session ${params.sessionId}. Run "openclaw doctor --fix" to import legacy JSONL transcripts.`,
+    );
+  }
+  const transcriptEntries = loadSqliteSessionTranscriptEvents(params).map(
+    (row) => row.event as TranscriptEntry,
+  );
   const header =
-    fileEntries.find((entry): entry is SessionHeader => entry.type === "session") ?? null;
-  const entries = fileEntries.filter((entry): entry is PiSessionEntry => entry.type !== "session");
+    transcriptEntries.find((entry): entry is SessionHeader => entry.type === "session") ?? null;
+  const entries = transcriptEntries.filter(
+    (entry): entry is PiSessionEntry => entry.type !== "session",
+  );
   const lastEntry = entries.at(-1);
   const leafId = typeof lastEntry?.id === "string" ? lastEntry.id : null;
-  return { header, entries, leafId, warnings: summarizeSessionExportWarnings(warnings) };
+  return { header, entries, leafId };
 }
 
 export async function buildExportSessionReply(params: HandleCommandsParams): Promise<ReplyPayload> {
@@ -267,14 +192,19 @@ export async function buildExportSessionReply(params: HandleCommandsParams): Pro
   if (isReplyPayload(sessionTarget)) {
     return sessionTarget;
   }
-  const { entry, sessionFile } = sessionTarget;
+  const { agentId, entry } = sessionTarget;
 
-  if (!(await pathExists(sessionFile))) {
-    return { text: `❌ Session file not found: ${sessionFile}` };
+  if (!hasScopedSqliteTranscriptEvents({ agentId, sessionId: entry.sessionId })) {
+    return {
+      text: `❌ Session transcript has not been migrated into SQLite. Run \`openclaw doctor --fix\` and try again.`,
+    };
   }
 
   // 2. Load session entries
-  const { entries, header, leafId, warnings } = await readSessionDataFromTranscript(sessionFile);
+  const { entries, header, leafId } = await readSessionDataFromTranscript({
+    agentId,
+    sessionId: entry.sessionId,
+  });
 
   // 3. Build full system prompt
   const { systemPrompt, tools } = await resolveCommandsSystemPromptBundle({
@@ -329,7 +259,6 @@ export async function buildExportSessionReply(params: HandleCommandsParams): Pro
       "",
       `📄 File: ${displayPath}`,
       `📊 Entries: ${entries.length}`,
-      ...warnings.map(formatSessionExportWarning),
       `🧠 System prompt: ${systemPrompt.length.toLocaleString()} chars`,
       `🔧 Tools: ${tools.length}`,
     ].join("\n"),

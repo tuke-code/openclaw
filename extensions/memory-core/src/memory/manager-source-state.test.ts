@@ -15,8 +15,20 @@ describe("memory source state", () => {
           all: (...args) => {
             calls.push({ sql, args });
             return [
-              { path: "memory/one.md", hash: "hash-1", mtime: 100, size: 10 },
-              { path: "memory/two.md", hash: "hash-2", mtime: 200, size: 20 },
+              {
+                sourceKey: "memory/one.md",
+                path: "memory/one.md",
+                hash: "hash-1",
+                mtime: 100,
+                size: 10,
+              },
+              {
+                sourceKey: "memory/two.md",
+                path: "memory/two.md",
+                hash: "hash-2",
+                mtime: 200,
+                size: 20,
+              },
             ];
           },
           get: () => undefined,
@@ -27,8 +39,8 @@ describe("memory source state", () => {
 
     expect(calls).toEqual([{ sql: MEMORY_SOURCE_FILE_STATE_SQL, args: ["memory"] }]);
     expect(state.rows).toEqual([
-      { path: "memory/one.md", hash: "hash-1", mtime: 100, size: 10 },
-      { path: "memory/two.md", hash: "hash-2", mtime: 200, size: 20 },
+      { sourceKey: "memory/one.md", path: "memory/one.md", hash: "hash-1", mtime: 100, size: 10 },
+      { sourceKey: "memory/two.md", path: "memory/two.md", hash: "hash-2", mtime: 200, size: 20 },
     ]);
     expect(state.hashes).toEqual(
       new Map([
@@ -51,8 +63,8 @@ describe("memory source state", () => {
         }),
       },
       source: "sessions",
-      path: "sessions/thread.jsonl",
-      existingHashes: new Map([["sessions/thread.jsonl", "hash-from-snapshot"]]),
+      sourceKey: "session:thread",
+      existingHashes: new Map([["session:thread", "hash-from-snapshot"]]),
     });
 
     expect(hash).toBe("hash-from-snapshot");
@@ -72,7 +84,7 @@ describe("memory source state", () => {
         }),
       },
       source: "sessions",
-      path: "sessions/thread.jsonl",
+      sourceKey: "session:thread",
       existingHashes: null,
     });
 
@@ -80,7 +92,7 @@ describe("memory source state", () => {
     expect(calls).toEqual([
       {
         sql: MEMORY_SOURCE_FILE_HASH_SQL,
-        args: ["sessions/thread.jsonl", "sessions"],
+        args: ["session:thread", "sessions"],
       },
     ]);
   });

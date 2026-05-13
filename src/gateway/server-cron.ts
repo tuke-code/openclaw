@@ -8,19 +8,14 @@ import {
   resolveAgentIdFromSessionKey,
   resolveAgentMainSessionKey,
 } from "../config/sessions.js";
-import { resolveStorePath } from "../config/sessions/paths.js";
 import type { AgentDefaultsConfig } from "../config/types.agent-defaults.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { runCronIsolatedAgentTurn } from "../cron/isolated-agent.js";
-import {
-  appendCronRunLog,
-  resolveCronRunLogPath,
-  resolveCronRunLogPruneOptions,
-} from "../cron/run-log.js";
+import { appendCronRunLogToSqlite, resolveCronRunLogPruneOptions } from "../cron/run-log.js";
 import type { CronServiceContract } from "../cron/service-contract.js";
 import { CronService } from "../cron/service.js";
 import { resolveCronSessionTargetSessionKey } from "../cron/session-target.js";
-import { resolveCronStorePath } from "../cron/store.js";
+import { resolveCronStoreKey } from "../cron/store.js";
 import type { CronJob } from "../cron/types.js";
 import { formatErrorMessage } from "../infra/errors.js";
 import { resolveMainScopedEventSessionKey } from "../infra/event-session-routing.js";
@@ -49,7 +44,7 @@ import {
 
 export type GatewayCronState = {
   cron: CronServiceContract;
-  storePath: string;
+  storeKey: string;
   cronEnabled: boolean;
 };
 
@@ -123,7 +118,7 @@ export function buildGatewayCronService(params: {
   broadcast: (event: string, payload: unknown, opts?: { dropIfSlow?: boolean }) => void;
 }): GatewayCronState {
   const cronLogger = getChildLogger({ module: "cron" });
-  const storePath = resolveCronStorePath(params.cfg.cron?.store);
+  const storeKey = resolveCronStoreKey();
   const cronEnabled = process.env.OPENCLAW_SKIP_CRON !== "1" && params.cfg.cron?.enabled !== false;
 
   const findAgentEntry = (cfg: OpenClawConfig, agentId: string) =>
@@ -281,13 +276,6 @@ export function buildGatewayCronService(params: {
 
   const defaultAgentId = resolveDefaultAgentId(params.cfg);
   const runLogPrune = resolveCronRunLogPruneOptions(params.cfg.cron?.runLog);
-  const resolveSessionStorePath = (agentId?: string) =>
-    resolveStorePath(params.cfg.session?.store, {
-      agentId: agentId ?? defaultAgentId,
-    });
-  const sessionStorePath = resolveSessionStorePath(defaultAgentId);
-  const warnedLegacyWebhookJobs = new Set<string>();
-
   const runCronChangedHook = (evt: PluginHookCronChangedEvent) => {
     const hookRunner = getGlobalHookRunner();
     if (!hookRunner?.hasHooks("cron_changed")) {
@@ -306,12 +294,10 @@ export function buildGatewayCronService(params: {
   };
 
   const cron = new CronService({
-    storePath,
+    storeKey,
     cronEnabled,
     cronConfig: params.cfg.cron,
     defaultAgentId,
-    resolveSessionStorePath,
-    sessionStorePath,
     enqueueSystemEvent: (text, opts) => {
       const { sessionKey } = resolveCronTarget(opts);
       if (!sessionKey) {
@@ -419,7 +405,7 @@ export function buildGatewayCronService(params: {
         mode,
         accountId,
       }),
-    log: getChildLogger({ module: "cron", storePath }),
+    log: getChildLogger({ module: "cron", storeKey }),
     onEvent: (evt) => {
       params.broadcast("cron", evt, { dropIfSlow: true });
       // Build hook event from CronEvent. The job snapshot is carried on the
@@ -466,17 +452,11 @@ export function buildGatewayCronService(params: {
           logger: cronLogger,
           resolveCronAgent,
           webhookToken: params.cfg.cron?.webhookToken,
-          legacyWebhook: params.cfg.cron?.webhook,
           globalFailureDestination: params.cfg.cron?.failureDestination,
-          warnedLegacyWebhookJobs,
         });
 
-        const logPath = resolveCronRunLogPath({
-          storePath,
-          jobId: evt.jobId,
-        });
-        void appendCronRunLog(
-          logPath,
+        void appendCronRunLogToSqlite(
+          storeKey,
           {
             ts: Date.now(),
             jobId: evt.jobId,
@@ -502,11 +482,11 @@ export function buildGatewayCronService(params: {
           },
           runLogPrune,
         ).catch((err) => {
-          cronLogger.warn({ err: String(err), logPath }, "cron: run log append failed");
+          cronLogger.warn({ err: String(err), storeKey }, "cron: run log append failed");
         });
       }
     },
   });
 
-  return { cron, storePath, cronEnabled };
+  return { cron, storeKey, cronEnabled };
 }

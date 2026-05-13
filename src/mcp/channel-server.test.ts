@@ -292,8 +292,7 @@ describe("openclaw channel mcp server", () => {
             }
           ).handleSessionMessageEvent({
             sessionKey,
-            lastChannel: "imessage",
-            lastTo: "+15551234567",
+            deliveryContext: { channel: "imessage", to: "+15551234567" },
             messageId: "msg-user-1",
             message: {
               role: "user",
@@ -326,8 +325,7 @@ describe("openclaw channel mcp server", () => {
             }
           ).handleSessionMessageEvent({
             sessionKey,
-            lastChannel: "imessage",
-            lastTo: "+15551234567",
+            deliveryContext: { channel: "imessage", to: "+15551234567" },
             messageId: "msg-user-2",
             message: {
               role: "user",
@@ -349,8 +347,7 @@ describe("openclaw channel mcp server", () => {
             }
           ).handleSessionMessageEvent({
             sessionKey,
-            lastChannel: "imessage",
-            lastTo: "+15551234567",
+            deliveryContext: { channel: "imessage", to: "+15551234567" },
             messageId: "msg-user-3",
             message: {
               role: "user",
@@ -456,7 +453,7 @@ describe("openclaw channel mcp server", () => {
             },
           },
           {
-            key: "agent:main:origin-field",
+            key: "agent:main:routed-field",
             deliveryContext: {
               channel: "imessage",
               to: "+15551230000",
@@ -474,7 +471,7 @@ describe("openclaw channel mcp server", () => {
       expect(conversations[0]?.sessionKey).toBe("agent:main:channel-field");
       expect(conversations[0]?.channel).toBe("telegram");
       expect(conversations[0]?.to).toBe("-100111");
-      expect(conversations[1]?.sessionKey).toBe("agent:main:origin-field");
+      expect(conversations[1]?.sessionKey).toBe("agent:main:routed-field");
       expect(conversations[1]?.channel).toBe("imessage");
       expect(conversations[1]?.to).toBe("+15551230000");
       expect(conversations[1]?.accountId).toBe("imessage-default");
@@ -531,10 +528,12 @@ describe("openclaw channel mcp server", () => {
           }
         ).handleSessionMessageEvent({
           sessionKey: "agent:main:main",
-          lastChannel: "telegram",
-          lastTo: "-100123",
-          lastAccountId: "acct-1",
-          lastThreadId: 42,
+          deliveryContext: {
+            channel: "telegram",
+            to: "-100123",
+            accountId: "acct-1",
+            threadId: 42,
+          },
           messageId: "msg-2",
           messageSeq: 1,
           message: {

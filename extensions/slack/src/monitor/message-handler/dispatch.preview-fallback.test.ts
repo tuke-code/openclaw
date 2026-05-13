@@ -258,7 +258,6 @@ function createPreparedSlackMessage(params?: {
       ...params?.ctxPayload,
     },
     turn: {
-      storePath: "/tmp/slack-sessions.json",
       record: {},
     },
     replyToMode: params?.replyToMode ?? "all",
@@ -659,7 +658,6 @@ vi.mock("../allow-list.js", () => ({
 }));
 
 vi.mock("../config.runtime.js", () => ({
-  resolveStorePath: () => "/tmp/openclaw-store.json",
   updateLastRoute: updateLastRouteMock,
 }));
 
@@ -1015,8 +1013,8 @@ describe("dispatchPreparedSlackMessage preview fallback", () => {
     );
 
     expect(updateLastRouteMock).toHaveBeenCalledWith({
-      storePath: "/tmp/openclaw-store.json",
       sessionKey: "agent:main:slack:direct:u1",
+      agentId: "main",
       deliveryContext: {
         channel: "slack",
         to: "user:U1",
@@ -1096,8 +1094,8 @@ describe("dispatchPreparedSlackMessage preview fallback", () => {
     );
 
     expect(updateLastRouteMock).toHaveBeenCalledWith({
-      storePath: "/tmp/openclaw-store.json",
       sessionKey: "agent:main:main",
+      agentId: "main",
       deliveryContext: {
         channel: "slack",
         to: "user:U1",

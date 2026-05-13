@@ -7,10 +7,7 @@ import {
   resolveCompletionProfilePath,
 } from "../cli/completion-runtime.js";
 import type { ShellCompletionStatus } from "../commands/doctor-completion.js";
-import {
-  checkShellCompletionStatus,
-  ensureCompletionCacheExists,
-} from "../commands/doctor-completion.js";
+import { checkShellCompletionStatus } from "../commands/doctor-completion.js";
 import { pathExists } from "../utils.js";
 import { t } from "./i18n/index.js";
 import type { WizardPrompter } from "./prompts.js";
@@ -19,8 +16,12 @@ import type { WizardFlow } from "./setup.types.js";
 type CompletionDeps = {
   resolveCliName: () => string;
   checkShellCompletionStatus: (binName: string) => Promise<ShellCompletionStatus>;
-  ensureCompletionCacheExists: (binName: string) => Promise<boolean>;
-  installCompletion: (shell: string, yes: boolean, binName?: string) => Promise<void>;
+  installCompletion: (
+    shell: string,
+    yes: boolean,
+    binName?: string,
+    options?: { retiredCachePath?: string | null },
+  ) => Promise<void>;
 };
 
 async function resolveProfileHint(shell: ShellCompletionStatus["shell"]): Promise<string> {
@@ -55,7 +56,6 @@ export async function setupWizardShellCompletion(params: {
   const deps: CompletionDeps = {
     resolveCliName,
     checkShellCompletionStatus,
-    ensureCompletionCacheExists,
     installCompletion,
     ...params.deps,
   };
@@ -63,23 +63,15 @@ export async function setupWizardShellCompletion(params: {
   const cliName = deps.resolveCliName();
   const completionStatus = await deps.checkShellCompletionStatus(cliName);
 
-  if (completionStatus.usesSlowPattern) {
-    // Case 1: Profile uses slow dynamic pattern - silently upgrade to cached version
-    const cacheGenerated = await deps.ensureCompletionCacheExists(cliName);
-    if (cacheGenerated) {
-      await deps.installCompletion(completionStatus.shell, true, cliName);
-    }
-    return;
-  }
-
-  if (completionStatus.profileInstalled && !completionStatus.cacheExists) {
-    // Case 2: Profile has completion but no cache - auto-fix silently
-    await deps.ensureCompletionCacheExists(cliName);
+  if (completionStatus.usesRetiredCache) {
+    // Profile points at the retired state-dir cache; rewrite it in place.
+    await deps.installCompletion(completionStatus.shell, true, cliName, {
+      retiredCachePath: completionStatus.retiredCachePath,
+    });
     return;
   }
 
   if (!completionStatus.profileInstalled) {
-    // Case 3: No completion at all
     const shouldInstall =
       params.flow === "quickstart"
         ? true
@@ -95,17 +87,6 @@ export async function setupWizardShellCompletion(params: {
       return;
     }
 
-    // Generate cache first (required for fast shell startup)
-    const cacheGenerated = await deps.ensureCompletionCacheExists(cliName);
-    if (!cacheGenerated) {
-      await params.prompter.note(
-        t("wizard.completion.cacheFailed", { command: `${cliName} completion --install` }),
-        t("wizard.completion.title"),
-      );
-      return;
-    }
-
-    // Install to shell profile
     await deps.installCompletion(completionStatus.shell, true, cliName);
 
     const profileHint = await resolveProfileHint(completionStatus.shell);
@@ -116,5 +97,4 @@ export async function setupWizardShellCompletion(params: {
       t("wizard.completion.title"),
     );
   }
-  // Case 4: Both profile and cache exist (using cached version) - all good, nothing to do
 }

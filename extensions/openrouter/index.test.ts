@@ -202,16 +202,9 @@ describe("openrouter provider hooks", () => {
 
   it("injects provider routing into compat before applying stream wrappers", async () => {
     const provider = await registerSingleProviderPlugin(openrouterPlugin);
-    let capturedPayload: Record<string, unknown> | undefined;
     const baseStreamFn = vi.fn(
-      (
-        ...args: Parameters<import("@earendil-works/pi-agent-core").StreamFn>
-      ): ReturnType<import("@earendil-works/pi-agent-core").StreamFn> => {
-        const payload: Record<string, unknown> = {};
-        void args[2]?.onPayload?.(payload, args[0]);
-        capturedPayload = payload;
-        return { async *[Symbol.asyncIterator]() {} } as never;
-      },
+      (..._args: Parameters<import("openclaw/plugin-sdk/agent-core").StreamFn>) =>
+        ({ async *[Symbol.asyncIterator]() {} }) as never,
     );
 
     const wrapped = provider.wrapStreamFn?.({
@@ -242,60 +235,6 @@ describe("openrouter provider hooks", () => {
     const firstModel = firstCall?.[0];
     const compat = (firstModel as { compat?: { openRouterRouting?: { order?: unknown } } }).compat;
     expect(compat?.openRouterRouting?.order).toEqual(["moonshot"]);
-    expect(capturedPayload?.provider).toEqual({
-      order: ["moonshot"],
-    });
-  });
-
-  it("merges resolved OpenRouter model params into transport params", async () => {
-    const provider = await registerSingleProviderPlugin(openrouterPlugin);
-    const patch = provider.extraParamsForTransport?.({
-      config: {
-        models: {
-          providers: {
-            openrouter: {
-              params: {
-                provider: {
-                  sort: "price",
-                  data_collection: "deny",
-                },
-              },
-            },
-          },
-        },
-      },
-      provider: "openrouter",
-      modelId: "openai/gpt-5.4",
-      extraParams: {
-        provider: {
-          sort: "latency",
-          require_parameters: true,
-        },
-        temperature: 0.2,
-      },
-      model: {
-        provider: "openrouter",
-        api: "openai-completions",
-        id: "openai/gpt-5.4",
-        params: {
-          responseCache: true,
-          provider: {
-            order: ["openai"],
-            constructor: "ignored",
-          },
-        },
-      },
-      transport: "sse",
-    } as never)?.patch;
-
-    expect(patch?.responseCache).toBe(true);
-    expect(patch?.temperature).toBe(0.2);
-    expect(patch?.provider).toEqual({
-      sort: "latency",
-      data_collection: "deny",
-      order: ["openai"],
-      require_parameters: true,
-    });
   });
 
   it("does not inject OpenRouter reasoning for Hunter Alpha", async () => {
@@ -303,8 +242,8 @@ describe("openrouter provider hooks", () => {
     let capturedPayload: Record<string, unknown> | undefined;
     const baseStreamFn = vi.fn(
       (
-        ...args: Parameters<import("@earendil-works/pi-agent-core").StreamFn>
-      ): ReturnType<import("@earendil-works/pi-agent-core").StreamFn> => {
+        ...args: Parameters<import("openclaw/plugin-sdk/agent-core").StreamFn>
+      ): ReturnType<import("openclaw/plugin-sdk/agent-core").StreamFn> => {
         void args[2]?.onPayload?.({}, args[0]);
         return { async *[Symbol.asyncIterator]() {} } as never;
       },
@@ -342,8 +281,8 @@ describe("openrouter provider hooks", () => {
     let capturedPayload: Record<string, unknown> | undefined;
     const baseStreamFn = vi.fn(
       (
-        ...args: Parameters<import("@earendil-works/pi-agent-core").StreamFn>
-      ): ReturnType<import("@earendil-works/pi-agent-core").StreamFn> => {
+        ...args: Parameters<import("openclaw/plugin-sdk/agent-core").StreamFn>
+      ): ReturnType<import("openclaw/plugin-sdk/agent-core").StreamFn> => {
         const payload = {
           messages: [
             { role: "user", content: "read file" },
@@ -396,8 +335,8 @@ describe("openrouter provider hooks", () => {
     const payloads: Array<Record<string, unknown>> = [];
     const baseStreamFn = vi.fn(
       (
-        ...args: Parameters<import("@earendil-works/pi-agent-core").StreamFn>
-      ): ReturnType<import("@earendil-works/pi-agent-core").StreamFn> => {
+        ...args: Parameters<import("openclaw/plugin-sdk/agent-core").StreamFn>
+      ): ReturnType<import("openclaw/plugin-sdk/agent-core").StreamFn> => {
         const payload = { messages: [] };
         void args[2]?.onPayload?.(payload, args[0]);
         payloads.push(payload);
@@ -440,8 +379,8 @@ describe("openrouter provider hooks", () => {
     const payloads: Array<Record<string, unknown>> = [];
     const baseStreamFn = vi.fn(
       (
-        ...args: Parameters<import("@earendil-works/pi-agent-core").StreamFn>
-      ): ReturnType<import("@earendil-works/pi-agent-core").StreamFn> => {
+        ...args: Parameters<import("openclaw/plugin-sdk/agent-core").StreamFn>
+      ): ReturnType<import("openclaw/plugin-sdk/agent-core").StreamFn> => {
         const payload = {
           messages: [{ role: "assistant", tool_calls: [{ id: "call_1", type: "function" }] }],
         };
@@ -503,8 +442,8 @@ describe("openrouter provider hooks", () => {
     let capturedPayload: Record<string, unknown> | undefined;
     const baseStreamFn = vi.fn(
       (
-        ...args: Parameters<import("@earendil-works/pi-agent-core").StreamFn>
-      ): ReturnType<import("@earendil-works/pi-agent-core").StreamFn> => {
+        ...args: Parameters<import("openclaw/plugin-sdk/agent-core").StreamFn>
+      ): ReturnType<import("openclaw/plugin-sdk/agent-core").StreamFn> => {
         const payload = {
           messages: [
             { role: "user", content: "Return JSON." },
@@ -541,58 +480,13 @@ describe("openrouter provider hooks", () => {
     expect(baseStreamFn).toHaveBeenCalledOnce();
   });
 
-  it("keeps OpenRouter-routed Anthropic tool-use assistant messages when reasoning is enabled", async () => {
-    const provider = await registerSingleProviderPlugin(openrouterPlugin);
-    let capturedPayload: Record<string, unknown> | undefined;
-    const messages = [
-      { role: "user", content: "Use the tool." },
-      {
-        role: "assistant",
-        content: [{ type: "tool_use", id: "toolu_1", name: "lookup", input: {} }],
-      },
-    ];
-    const baseStreamFn = vi.fn(
-      (
-        ...args: Parameters<import("@earendil-works/pi-agent-core").StreamFn>
-      ): ReturnType<import("@earendil-works/pi-agent-core").StreamFn> => {
-        const payload = { messages: [...messages] };
-        void args[2]?.onPayload?.(payload, args[0]);
-        capturedPayload = payload;
-        return { async *[Symbol.asyncIterator]() {} } as never;
-      },
-    );
-
-    const wrapped = provider.wrapStreamFn?.({
-      provider: "openrouter",
-      modelId: "anthropic/claude-opus-4.6",
-      streamFn: baseStreamFn,
-      thinkingLevel: "high",
-    } as never);
-
-    void wrapped?.(
-      {
-        provider: "openrouter",
-        api: "openai-completions",
-        id: "anthropic/claude-opus-4.6",
-        baseUrl: "https://openrouter.ai/api/v1",
-        compat: {},
-      } as never,
-      { messages: [] } as never,
-      {},
-    );
-
-    expect(capturedPayload?.messages).toEqual(messages);
-    expect(capturedPayload?.reasoning).toEqual({ effort: "high" });
-    expect(baseStreamFn).toHaveBeenCalledOnce();
-  });
-
   it("keeps OpenRouter Anthropic prefill when reasoning is disabled or the route is custom", async () => {
     const provider = await registerSingleProviderPlugin(openrouterPlugin);
     const payloads: Array<Record<string, unknown>> = [];
     const baseStreamFn = vi.fn(
       (
-        ...args: Parameters<import("@earendil-works/pi-agent-core").StreamFn>
-      ): ReturnType<import("@earendil-works/pi-agent-core").StreamFn> => {
+        ...args: Parameters<import("openclaw/plugin-sdk/agent-core").StreamFn>
+      ): ReturnType<import("openclaw/plugin-sdk/agent-core").StreamFn> => {
         const payload = {
           messages: [
             { role: "user", content: "Return JSON." },

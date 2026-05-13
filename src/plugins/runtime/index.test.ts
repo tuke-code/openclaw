@@ -315,9 +315,6 @@ describe("plugin runtime command execution", () => {
           "listSessionEntries",
           "patchSessionEntry",
           "upsertSessionEntry",
-          "updateSessionStore",
-          "updateSessionStoreEntry",
-          "resolveSessionFilePath",
         ]);
       },
     },

@@ -71,9 +71,12 @@ export function createCodexAppServerAgentHarness(options?: {
       });
     },
     reset: async (params) => {
-      if (params.sessionFile) {
+      if (params.sessionId || params.sessionKey) {
         const { clearCodexAppServerBinding } = await import("./src/app-server/session-binding.js");
-        await clearCodexAppServerBinding(params.sessionFile);
+        await clearCodexAppServerBinding({
+          sessionKey: params.sessionKey,
+          sessionId: params.sessionId,
+        });
       }
     },
     dispose: async () => {

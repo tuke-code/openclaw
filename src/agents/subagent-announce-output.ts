@@ -1,5 +1,4 @@
 import { isSilentReplyText, SILENT_REPLY_TOKEN } from "../auto-reply/tokens.js";
-import { formatBlockedLivenessError, isBlockedLivenessState } from "../shared/agent-liveness.js";
 import { extractTextFromChatContent } from "../shared/chat-content.js";
 import { wrapPromptDataBlock } from "./sanitize-for-prompt.js";
 import {
@@ -8,10 +7,9 @@ import {
 } from "./subagent-announce-capture.js";
 import {
   callGateway,
+  getSessionEntry,
   getRuntimeConfig,
-  readSessionEntry,
   resolveAgentIdFromSessionKey,
-  resolveStorePath,
 } from "./subagent-announce.runtime.js";
 import { assistantCallsSessionsYield, isSessionsYieldToolResult } from "./subagent-yield-output.js";
 import { readLatestAssistantReply } from "./tools/agent-step.js";
@@ -377,10 +375,7 @@ export function applySubagentWaitOutcome(params: {
   }
   const waitError = typeof params.wait?.error === "string" ? params.wait.error : undefined;
   let outcome = next.outcome;
-  // Capture/announcement callers can pass raw wait snapshots that bypass the primary normalizers.
-  if (isBlockedLivenessState(params.wait?.livenessState)) {
-    outcome = { status: "error", error: formatBlockedLivenessError(waitError) };
-  } else if (params.wait?.status === "timeout") {
+  if (params.wait?.status === "timeout") {
     outcome = { status: "timeout" };
   } else if (params.wait?.status === "error") {
     outcome = { status: "error", error: waitError };
@@ -574,10 +569,8 @@ export async function buildCompactAnnounceStatsLine(params: {
   startedAt?: number;
   endedAt?: number;
 }) {
-  const cfg = subagentAnnounceOutputDeps.getRuntimeConfig();
   const agentId = resolveAgentIdFromSessionKey(params.sessionKey);
-  const storePath = resolveStorePath(cfg.session?.store, { agentId });
-  let entry = readSessionEntry(storePath, params.sessionKey);
+  let entry = getSessionEntry({ agentId, sessionKey: params.sessionKey });
   const tokenWaitAttempts = isFastTestMode() ? 1 : 3;
   for (let attempt = 0; attempt < tokenWaitAttempts; attempt += 1) {
     const hasTokenData =
@@ -590,7 +583,7 @@ export async function buildCompactAnnounceStatsLine(params: {
     if (!isFastTestMode()) {
       await new Promise((resolve) => setTimeout(resolve, 150));
     }
-    entry = readSessionEntry(storePath, params.sessionKey);
+    entry = getSessionEntry({ agentId, sessionKey: params.sessionKey });
   }
 
   const input = typeof entry?.inputTokens === "number" ? entry.inputTokens : 0;

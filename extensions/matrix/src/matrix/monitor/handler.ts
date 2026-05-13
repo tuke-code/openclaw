@@ -32,10 +32,7 @@ import {
 import type { GetReplyOptions } from "openclaw/plugin-sdk/reply-runtime";
 import { resolveInboundLastRouteSessionKey } from "openclaw/plugin-sdk/routing";
 import { resolvePinnedMainDmOwnerFromAllowlist } from "openclaw/plugin-sdk/security-runtime";
-import {
-  loadSessionStore,
-  resolveSessionStoreEntry,
-} from "openclaw/plugin-sdk/session-store-runtime";
+import { getSessionEntry } from "openclaw/plugin-sdk/session-store-runtime";
 import { normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
 import type {
   CoreConfig,
@@ -307,7 +304,7 @@ function markTrackedRoomIfFirst(set: Set<string>, roomId: string): boolean {
 }
 
 function resolveMatrixSharedDmContextNotice(params: {
-  storePath: string;
+  agentId: string;
   sessionKey: string;
   roomId: string;
   accountId: string;
@@ -323,12 +320,11 @@ function resolveMatrixSharedDmContextNotice(params: {
   }
 
   try {
-    const store = loadSessionStore(params.storePath);
     const currentSession = resolveMatrixStoredSessionMeta(
-      resolveSessionStoreEntry({
-        store,
+      getSessionEntry({
+        agentId: params.agentId,
         sessionKey: params.sessionKey,
-      }).existing,
+      }),
     );
     if (!currentSession) {
       return null;
@@ -1304,12 +1300,9 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
       const roomName = roomInfo?.name;
       const envelopeFrom = isDirectMessage ? senderName : (roomName ?? roomId);
       const textWithId = `${bodyText}\n[matrix event id: ${messageId} room: ${roomId}]`;
-      const storePath = core.channel.session.resolveStorePath(cfg.session?.store, {
-        agentId: _route.agentId,
-      });
       const envelopeOptions = core.channel.reply.resolveEnvelopeFormatOptions(cfg);
       const previousTimestamp = core.channel.session.readSessionUpdatedAt({
-        storePath,
+        agentId: _route.agentId,
         sessionKey: _route.sessionKey,
       });
       const sharedDmNoticeSessionKey = threadTarget
@@ -1319,7 +1312,7 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
         ? hasExplicitSessionBinding
           ? null
           : resolveMatrixSharedDmContextNotice({
-              storePath,
+              agentId: _route.agentId,
               sessionKey: sharedDmNoticeSessionKey,
               roomId,
               accountId: _route.accountId,
@@ -2073,8 +2066,8 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
           resolveTurn: () => ({
             channel: "matrix",
             accountId: _route.accountId,
+            agentId: _route.agentId,
             routeSessionKey: _route.sessionKey,
-            storePath,
             ctxPayload,
             recordInboundSession: core.channel.session.recordInboundSession,
             botLoopProtection,
@@ -2108,7 +2101,7 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
               onRecordError: (err) => {
                 logger.warn("failed updating session meta", {
                   error: String(err),
-                  storePath,
+                  agentId: _route.agentId,
                   sessionKey: ctxPayload.SessionKey ?? _route.sessionKey,
                 });
               },

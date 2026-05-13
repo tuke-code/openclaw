@@ -1,4 +1,3 @@
-import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ThinkLevel } from "../../../auto-reply/thinking.js";
 import { formatErrorMessage } from "../../../infra/errors.js";
 import { prepareProviderRuntimeAuth } from "../../../plugins/provider-runtime.js";
@@ -14,6 +13,7 @@ import {
   getApiKeyForModel,
   type ResolvedProviderAuth,
 } from "../../model-auth.js";
+import type { Api, Model } from "../../pi-ai-contract.js";
 import {
   classifyFailoverReason,
   isFailoverErrorMessage,

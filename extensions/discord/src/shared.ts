@@ -33,7 +33,6 @@ import {
   unsupportedSecretRefSurfacePatterns,
 } from "./security-contract.js";
 import { discordSecurityAdapter } from "./security.js";
-import { deriveLegacySessionChatType } from "./session-contract.js";
 
 const DISCORD_CHANNEL = "discord" as const;
 
@@ -165,9 +164,6 @@ export function createDiscordPluginBase(params: {
             tokenStatus: account.tokenStatus,
           },
         }),
-    },
-    messaging: {
-      deriveLegacySessionChatType,
     },
     security: discordSecurityAdapter,
     secrets: {

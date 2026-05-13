@@ -7,7 +7,6 @@ import {
 } from "./group-policy.js";
 import { whatsappSetupAdapter } from "./setup-core.js";
 import { createWhatsAppPluginBase, whatsappSetupWizardProxy } from "./shared.js";
-import { detectWhatsAppLegacyStateMigrations } from "./state-migrations.js";
 
 async function isWhatsAppAuthConfigured(account: ResolvedWhatsAppAccount): Promise<boolean> {
   const { readWebAuthState } = await import("./auth-store.js");
@@ -25,8 +24,4 @@ export const whatsappSetupPlugin: ChannelPlugin<ResolvedWhatsAppAccount> = {
     setup: whatsappSetupAdapter,
     isConfigured: isWhatsAppAuthConfigured,
   }),
-  lifecycle: {
-    detectLegacyStateMigrations: ({ oauthDir }) =>
-      detectWhatsAppLegacyStateMigrations({ oauthDir }),
-  },
 };

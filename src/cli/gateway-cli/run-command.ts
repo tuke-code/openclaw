@@ -51,8 +51,7 @@ export function addGatewayRunCommand(cmd: Command): Command {
     .option("--claude-cli-logs", "Deprecated alias for --cli-backend-logs", false)
     .option("--ws-log <style>", 'WebSocket log style ("auto"|"full"|"compact")', "auto")
     .option("--compact", 'Alias for "--ws-log compact"', false)
-    .option("--raw-stream", "Log raw model stream events to jsonl", false)
-    .option("--raw-stream-path <path>", "Raw stream jsonl path")
+    .option("--raw-stream", "Log raw model stream events to SQLite diagnostics", false)
     .action(async (opts, command) => {
       const { resolveGatewayRunOptions, runGatewayCommand } = await import("./run.js");
       await runGatewayCommand(resolveGatewayRunOptions(opts, command));

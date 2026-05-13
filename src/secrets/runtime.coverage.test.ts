@@ -190,7 +190,7 @@ vi.mock("../plugins/web-provider-public-artifacts.explicit.js", () => ({
 
 type SecretRegistryEntry = {
   id: string;
-  configFile: "openclaw.json" | "auth-profiles.json";
+  store: "openclaw.json" | "auth-profile-store";
   pathPattern: string;
   refPathPattern?: string;
   secretShape: "secret_input" | "sibling_ref";
@@ -201,7 +201,7 @@ type SecretRegistryEntry = {
 type SecretRefCredentialMatrix = {
   entries: Array<{
     id: string;
-    configFile: "openclaw.json" | "auth-profiles.json";
+    store: "openclaw.json" | "auth-profile-store";
     path: string;
     refPath?: string;
     secretShape: SecretRegistryEntry["secretShape"];
@@ -221,7 +221,7 @@ function loadCoverageRegistryEntries(): SecretRegistryEntry[] {
   const matrix = JSON.parse(fs.readFileSync(matrixPath, "utf8")) as SecretRefCredentialMatrix;
   return matrix.entries.map((entry) =>
     Object.assign(
-      { id: entry.id, configFile: entry.configFile, pathPattern: entry.path },
+      { id: entry.id, store: entry.store, pathPattern: entry.path },
       entry.refPath ? { refPathPattern: entry.refPath } : {},
       { secretShape: entry.secretShape, expectedResolvedValue: "string" as const },
       entry.when?.type ? { authProfileType: entry.when.type } : {},
@@ -460,7 +460,7 @@ function collectOpenClawCoverageEntries(options: {
 }): SecretRegistryEntry[] {
   return COVERAGE_REGISTRY_ENTRIES.filter(
     (entry) =>
-      entry.configFile === "openclaw.json" &&
+      entry.store === "openclaw.json" &&
       entry.id.startsWith("plugins.entries.") === options.includePluginEntries &&
       !PLUGIN_OWNED_OPENCLAW_COVERAGE_EXCLUSIONS.has(entry.id),
   );
@@ -842,7 +842,7 @@ describe("secrets runtime target coverage", () => {
     test.each(AUTH_PROFILE_COVERAGE_BATCHES.map(toCoverageBatchCase))(
       "handles $name",
       async ({ batch }) => {
-        logCoverageBatch("auth-profiles.json", batch);
+        logCoverageBatch("auth-profile-store", batch);
         const env: Record<string, string> = {};
         const authStore: AuthProfileStore = {
           version: 1,

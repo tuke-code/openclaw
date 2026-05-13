@@ -623,6 +623,13 @@ export type DiagnosticAsyncQueueDroppedEvent = DiagnosticBaseEvent & {
   drainBatchSize: number;
 };
 
+export type DiagnosticSqliteWalCheckpointErrorEvent = DiagnosticBaseEvent & {
+  type: "sqlite.wal.checkpoint.error";
+  databaseLabel: string;
+  checkpointMode: string;
+  error: string;
+};
+
 export type DiagnosticEventPayload =
   | DiagnosticUsageEvent
   | DiagnosticWebhookReceivedEvent
@@ -672,7 +679,8 @@ export type DiagnosticEventPayload =
   | DiagnosticLogRecordEvent
   | DiagnosticTelemetryExporterEvent
   | DiagnosticAsyncQueueDroppedEvent
-  | DiagnosticFailoverEvent;
+  | DiagnosticFailoverEvent
+  | DiagnosticSqliteWalCheckpointErrorEvent;
 
 export type DiagnosticEventInput = DiagnosticEventPayload extends infer Event
   ? Event extends DiagnosticEventPayload

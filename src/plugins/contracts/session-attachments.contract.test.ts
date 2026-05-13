@@ -450,10 +450,10 @@ describe("plugin session attachments", () => {
   });
 
   it("returns validation errors for unreadable attachment MIME probes", async () => {
-    await withSessionStore(async ({ storePath, stateDir }) => {
+    await withSessionStore(async ({ stateDir }) => {
       const unreadablePath = path.join(stateDir, "unreadable.pdf");
       await fs.writeFile(unreadablePath, "%PDF-1.7\n", "utf8");
-      await writeSessionEntry(storePath);
+      await writeSessionEntry();
       const originalOpen = attachmentProbeFs.open.bind(attachmentProbeFs);
       const openSpy = vi.spyOn(attachmentProbeFs, "open").mockImplementation((async (...args) => {
         const [target] = args;

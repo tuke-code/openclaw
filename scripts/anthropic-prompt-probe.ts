@@ -15,6 +15,8 @@ import process from "node:process";
 import { pathToFileURL } from "node:url";
 import { resolveDefaultAgentDir } from "../src/agents/agent-scope.js";
 import { ensureAuthProfileStore, type AuthProfileCredential } from "../src/agents/auth-profiles.js";
+import { savePersistedAuthProfileSecretsStore } from "../src/agents/auth-profiles/persisted.js";
+import type { AuthProfileSecretsStore } from "../src/agents/auth-profiles/types.js";
 import { normalizeProviderId } from "../src/agents/model-selection.js";
 import { validateAnthropicSetupToken } from "../src/commands/auth-token.js";
 import { callGateway } from "../src/gateway/call.js";
@@ -586,22 +588,19 @@ async function runGatewayPrompt(prompt: string): Promise<PromptResult> {
       2,
     )}\n`,
   );
-  await fs.writeFile(
-    path.join(agentDir, "auth-profiles.json"),
-    `${JSON.stringify(
-      {
-        version: 1,
-        profiles: {
-          [tokenSource.profileId]: {
-            type: "token",
-            provider: "anthropic",
-            token: tokenSource.token,
-          },
+  savePersistedAuthProfileSecretsStore(
+    {
+      version: 1,
+      profiles: {
+        [tokenSource.profileId]: {
+          type: "token",
+          provider: "anthropic",
+          token: tokenSource.token,
         },
       },
-      null,
-      2,
-    )}\n`,
+    } as AuthProfileSecretsStore,
+    agentDir,
+    { env: { ...process.env, OPENCLAW_STATE_DIR: stateDir } },
   );
 
   const gateway = await startGatewayProcess({

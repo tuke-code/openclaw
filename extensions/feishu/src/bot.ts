@@ -1171,9 +1171,8 @@ export async function handleFeishuMessage(params: {
         return threadContext;
       }
 
-      const storePath = core.channel.session.resolveStorePath(cfg.session?.store, { agentId });
       const previousThreadSessionTimestamp = core.channel.session.readSessionUpdatedAt({
-        storePath,
+        agentId,
         sessionKey: agentSessionKey,
       });
       if (previousThreadSessionTimestamp) {
@@ -1416,9 +1415,6 @@ export async function handleFeishuMessage(params: {
         }
 
         const agentSessionKey = buildBroadcastSessionKey(route.sessionKey, route.agentId, agentId);
-        const agentStorePath = core.channel.session.resolveStorePath(cfg.session?.store, {
-          agentId,
-        });
         const agentRecord = {
           updateLastRoute: buildFeishuInboundLastRouteUpdate({
             sessionKey: agentSessionKey,
@@ -1433,7 +1429,6 @@ export async function handleFeishuMessage(params: {
         const allowReasoningPreview = resolveFeishuReasoningPreviewEnabled({
           cfg,
           agentId,
-          storePath: agentStorePath,
           sessionKey: agentSessionKey,
         });
         const agentCtx = await buildCtxPayloadForAgent(
@@ -1481,8 +1476,8 @@ export async function handleFeishuMessage(params: {
               resolveTurn: () => ({
                 channel: "feishu",
                 accountId: route.accountId,
+                agentId,
                 routeSessionKey: agentSessionKey,
-                storePath: agentStorePath,
                 ctxPayload: agentCtx,
                 recordInboundSession: core.channel.session.recordInboundSession,
                 record: agentRecord,
@@ -1540,8 +1535,8 @@ export async function handleFeishuMessage(params: {
               resolveTurn: () => ({
                 channel: "feishu",
                 accountId: route.accountId,
+                agentId,
                 routeSessionKey: agentSessionKey,
-                storePath: agentStorePath,
                 ctxPayload: agentCtx,
                 recordInboundSession: core.channel.session.recordInboundSession,
                 record: agentRecord,
@@ -1602,13 +1597,9 @@ export async function handleFeishuMessage(params: {
       );
 
       const identity = resolveAgentOutboundIdentity(cfg, route.agentId);
-      const storePath = core.channel.session.resolveStorePath(cfg.session?.store, {
-        agentId: route.agentId,
-      });
       const allowReasoningPreview = resolveFeishuReasoningPreviewEnabled({
         cfg,
         agentId: route.agentId,
-        storePath,
         sessionKey: route.sessionKey,
       });
       const { dispatcher, replyOptions, markDispatchIdle } = createFeishuReplyDispatcher({
@@ -1644,8 +1635,8 @@ export async function handleFeishuMessage(params: {
           resolveTurn: () => ({
             channel: "feishu",
             accountId: route.accountId,
+            agentId: route.agentId,
             routeSessionKey: route.sessionKey,
-            storePath,
             ctxPayload,
             recordInboundSession: core.channel.session.recordInboundSession,
             record: {

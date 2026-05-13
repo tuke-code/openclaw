@@ -1,110 +1,75 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
-import {
-  formatCompletionReloadCommand,
-  formatCompletionSourceLine,
-  installCompletion,
-  resolveCompletionCachePath,
-  resolveCompletionProfilePath,
-  resolveShellFromEnv,
-} from "./completion-runtime.js";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { checkShellCompletionStatus } from "../commands/doctor-completion.js";
+import { installCompletion } from "./completion-runtime.js";
 
-describe("completion-runtime", () => {
+describe("completion runtime", () => {
   const originalHome = process.env.HOME;
+  const originalShell = process.env.SHELL;
   const originalStateDir = process.env.OPENCLAW_STATE_DIR;
 
-  afterEach(() => {
+  let homeDir = "";
+  let stateDir = "";
+
+  beforeEach(async () => {
+    homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-completion-home-"));
+    stateDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-completion-state-"));
+    process.env.HOME = homeDir;
+    process.env.SHELL = "/bin/zsh";
+    process.env.OPENCLAW_STATE_DIR = stateDir;
+  });
+
+  afterEach(async () => {
     if (originalHome === undefined) {
       delete process.env.HOME;
     } else {
       process.env.HOME = originalHome;
+    }
+    if (originalShell === undefined) {
+      delete process.env.SHELL;
+    } else {
+      process.env.SHELL = originalShell;
     }
     if (originalStateDir === undefined) {
       delete process.env.OPENCLAW_STATE_DIR;
     } else {
       process.env.OPENCLAW_STATE_DIR = originalStateDir;
     }
+
+    await fs.rm(homeDir, { recursive: true, force: true });
+    await fs.rm(stateDir, { recursive: true, force: true });
   });
 
-  it("formats PowerShell source and reload commands with single-quoted paths", () => {
-    expect(
-      formatCompletionSourceLine("powershell", "openclaw", "C:\\Users\\Ada\\open'claw.ps1"),
-    ).toBe(". 'C:\\Users\\Ada\\open''claw.ps1'");
-    expect(formatCompletionReloadCommand("powershell", "C:\\Users\\Ada\\profile.ps1")).toBe(
-      ". 'C:\\Users\\Ada\\profile.ps1'",
-    );
+  it("installs dynamic profile sourcing without writing completion cache files", async () => {
+    await installCompletion("zsh", true, "openclaw");
+
+    const profile = await fs.readFile(path.join(homeDir, ".zshrc"), "utf-8");
+    expect(profile).toContain("source <(openclaw completion --shell zsh)");
+    await expect(fs.stat(path.join(stateDir, "completions"))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
   });
 
-  it("detects PowerShell shell names from Windows paths", () => {
-    expect(resolveShellFromEnv({ SHELL: "C:\\Program Files\\PowerShell\\7\\pwsh.exe" })).toBe(
-      "powershell",
-    );
-    expect(
-      resolveShellFromEnv({
-        SHELL: "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
-      }),
-    ).toBe("powershell");
-  });
+  it("rewrites a retired state-dir completion cache profile line", async () => {
+    const retiredCachePath = path.join(stateDir, "completions", "openclaw.zsh");
+    await fs.writeFile(path.join(homeDir, ".zshrc"), `source ${retiredCachePath}\n`, "utf-8");
 
-  it("resolves Windows PowerShell and pwsh profile directories", () => {
-    expect(
-      resolveCompletionProfilePath("powershell", {
-        env: {
-          SHELL: "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
-          USERPROFILE: "C:\\Users\\Ada",
-        },
-        homeDir: () => "C:\\Users\\Ada",
-        platform: "win32",
-      }),
-    ).toBe(
-      path.win32.join(
-        "C:\\Users\\Ada",
-        "Documents",
-        "PowerShell",
-        "Microsoft.PowerShell_profile.ps1",
-      ),
-    );
-    expect(
-      resolveCompletionProfilePath("powershell", {
-        env: {
-          SHELL: "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
-          USERPROFILE: "C:\\Users\\Ada",
-        },
-        homeDir: () => "C:\\Users\\Ada",
-        platform: "win32",
-      }),
-    ).toBe(
-      path.win32.join(
-        "C:\\Users\\Ada",
-        "Documents",
-        "WindowsPowerShell",
-        "Microsoft.PowerShell_profile.ps1",
-      ),
-    );
-  });
+    const status = await checkShellCompletionStatus("openclaw");
+    expect(status).toMatchObject({
+      profileInstalled: false,
+      retiredCachePath,
+      shell: "zsh",
+      usesRetiredCache: true,
+    });
 
-  it("installs PowerShell completion into the concrete profile path", async () => {
-    const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-completion-home-"));
-    const stateDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-completion-state-"));
+    await installCompletion("zsh", true, "openclaw", {
+      retiredCachePath: status.retiredCachePath,
+    });
 
-    process.env.HOME = homeDir;
-    process.env.OPENCLAW_STATE_DIR = stateDir;
-
-    try {
-      const cachePath = resolveCompletionCachePath("powershell", "openclaw");
-      await fs.mkdir(path.dirname(cachePath), { recursive: true });
-      await fs.writeFile(cachePath, "# powershell completion\n", "utf-8");
-
-      await installCompletion("powershell", true, "openclaw");
-
-      const profilePath = resolveCompletionProfilePath("powershell");
-      const profile = await fs.readFile(profilePath, "utf-8");
-      expect(profile).toBe(`# OpenClaw Completion\n. '${cachePath}'\n`);
-    } finally {
-      await fs.rm(homeDir, { recursive: true, force: true });
-      await fs.rm(stateDir, { recursive: true, force: true });
-    }
+    const profile = await fs.readFile(path.join(homeDir, ".zshrc"), "utf-8");
+    expect(profile).toContain("source <(openclaw completion --shell zsh)");
+    expect(profile).not.toContain(retiredCachePath);
   });
 });

@@ -12,7 +12,6 @@ import type { TelegramGetChat } from "./bot/types.js";
 const harness = await import("./bot.create-telegram-bot.test-harness.js");
 const conversationRuntime = await import("openclaw/plugin-sdk/conversation-runtime");
 const configMutation = await import("openclaw/plugin-sdk/config-mutation");
-const sessionStoreRuntime = await import("openclaw/plugin-sdk/session-store-runtime");
 const EYES_EMOJI = "\u{1F440}";
 const {
   answerCallbackQuerySpy,
@@ -25,7 +24,6 @@ const {
   getLoadWebMediaMock,
   getChatSpy,
   getLoadConfigMock,
-  getLoadSessionStoreMock,
   getOnHandler,
   getReadChannelAllowFromStoreMock,
   getUpsertChannelPairingRequestMock,
@@ -71,7 +69,6 @@ let createTelegramBot: (
 ) => ReturnType<typeof import("./bot-core.js").createTelegramBotCore>;
 
 const loadConfig = getLoadConfigMock();
-const loadSessionStore = getLoadSessionStoreMock();
 const loadWebMedia = getLoadWebMediaMock();
 const readChannelAllowFromStore = getReadChannelAllowFromStoreMock();
 const upsertChannelPairingRequest = getUpsertChannelPairingRequestMock();
@@ -3459,8 +3456,7 @@ describe("createTelegramBot", () => {
       }
     }
   });
-  it("honors routed group activation from session store", async () => {
-    const storePath = "/tmp/openclaw-telegram-group-activation.json";
+  it("honors routed group activation from SQLite session rows", async () => {
     const routedGroupEntry = {
       sessionId: "agent:ops:telegram:group:123",
       updatedAt: 0,
@@ -3470,9 +3466,6 @@ describe("createTelegramBot", () => {
     setSessionStoreEntriesForTest({
       "agent:ops:telegram:group:123": routedGroupEntry,
     });
-    loadSessionStore.mockImplementation(() => ({
-      "agent:ops:telegram:group:123": routedGroupEntry,
-    }));
     const config = {
       channels: {
         telegram: {
@@ -3489,7 +3482,7 @@ describe("createTelegramBot", () => {
           },
         },
       ],
-      session: { store: storePath },
+      session: {},
     };
     loadConfig.mockReturnValue(config);
 
@@ -4379,8 +4372,8 @@ describe("createTelegramBot", () => {
       await dispatch(0);
     };
 
-    const updateSessionStoreSpy = vi.spyOn(sessionStoreRuntime, "updateSessionStore");
-    updateSessionStoreSpy.mockRejectedValueOnce(new Error("session store boom"));
+    const patchSessionEntryMock = vi.mocked(telegramBotDepsForTest.patchSessionEntry);
+    patchSessionEntryMock.mockRejectedValueOnce(new Error("session row boom"));
 
     const ctx = {
       update: { update_id: 890 },
@@ -4398,12 +4391,8 @@ describe("createTelegramBot", () => {
       getFile: async () => ({ download: async () => new Uint8Array() }),
     };
 
-    try {
-      await expect(runMiddlewareChain(ctx)).rejects.toThrow("session store boom");
-      await runMiddlewareChain(ctx);
-    } finally {
-      updateSessionStoreSpy.mockRestore();
-    }
+    await expect(runMiddlewareChain(ctx)).rejects.toThrow("session row boom");
+    await runMiddlewareChain(ctx);
 
     expect(editMessageTextSpy).toHaveBeenCalledTimes(1);
     expect(String(editMessageTextSpy.mock.calls.at(-1)?.[2] ?? "")).toContain(

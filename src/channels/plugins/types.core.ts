@@ -1,5 +1,5 @@
-import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 import type { TSchema } from "typebox";
+import type { AgentTool, AgentToolResult } from "../../agents/agent-core-contract.js";
 import type { ReplyPayload } from "../../auto-reply/reply-payload.js";
 import type { MsgContext } from "../../auto-reply/templating.js";
 import type { MarkdownTableMode } from "../../config/types.base.js";
@@ -25,7 +25,9 @@ export type ChannelExposure = {
 export type ChannelOutboundTargetMode = "explicit" | "implicit" | "heartbeat";
 
 /** Agent tool registered by a channel plugin. */
-export type ChannelAgentTool = AgentTool<TSchema, unknown>;
+export type ChannelAgentTool = AgentTool & {
+  ownerOnly?: boolean;
+};
 
 /** Lazy agent-tool factory used when tool availability depends on config. */
 export type ChannelAgentToolFactory = (params: { cfg?: OpenClawConfig }) => ChannelAgentTool[];
@@ -151,12 +153,42 @@ export type ChannelHeartbeatDeps = {
   hasActiveWebListener?: (accountId?: string) => boolean;
 };
 
-export type ChannelLegacyStateMigrationPlan = {
+export type ChannelDoctorLegacyStateMigrationApplyResult = {
+  changes: string[];
+  warnings: string[];
+};
+
+export type ChannelDoctorLegacyStateMigrationApplyContext = {
+  cfg: OpenClawConfig;
+  env: NodeJS.ProcessEnv;
+  stateDir: string;
+  oauthDir: string;
+};
+
+export type ChannelDoctorLegacyStateMigrationFilePlan = {
   kind: "copy" | "move";
   label: string;
   sourcePath: string;
   targetPath: string;
 };
+
+export type ChannelDoctorLegacyStateMigrationCustomPlan = {
+  kind: "custom";
+  label: string;
+  sourcePath: string;
+  targetPath?: string;
+  targetTable?: string;
+  recordCount?: number;
+  apply: (
+    context: ChannelDoctorLegacyStateMigrationApplyContext,
+  ) =>
+    | ChannelDoctorLegacyStateMigrationApplyResult
+    | Promise<ChannelDoctorLegacyStateMigrationApplyResult>;
+};
+
+export type ChannelDoctorLegacyStateMigrationPlan =
+  | ChannelDoctorLegacyStateMigrationFilePlan
+  | ChannelDoctorLegacyStateMigrationCustomPlan;
 
 /** User-facing metadata used in docs, pickers, and setup surfaces. */
 export type ChannelMeta = {
@@ -179,7 +211,6 @@ export type ChannelMeta = {
   showInSetup?: boolean;
   quickstartAllowFrom?: boolean;
   forceAccountBinding?: boolean;
-  preferSessionLookupForAnnounceTarget?: boolean;
   preferOver?: readonly string[];
 };
 
@@ -680,7 +711,6 @@ export type ChannelMessageActionContext = {
    * never be sourced from tool/model-controlled params.
    */
   requesterSenderId?: string | null;
-  /** Trusted owner identity bit from command/channel-action auth. */
   senderIsOwner?: boolean;
   sessionKey?: string | null;
   sessionId?: string | null;
@@ -758,7 +788,7 @@ export type ChannelMessageActionAdapter = {
    * Prefer this for channel-specific poll semantics or extra poll parameters.
    * Core only parses the shared poll model when falling back to `outbound.sendPoll`.
    */
-  handleAction?: (ctx: ChannelMessageActionContext) => Promise<AgentToolResult<unknown>>;
+  handleAction?: (ctx: ChannelMessageActionContext) => Promise<AgentToolResult>;
 };
 
 export type ChannelPollResult = {

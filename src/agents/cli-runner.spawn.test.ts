@@ -104,7 +104,6 @@ function buildPreparedCliRunContext(params: {
     params: {
       sessionId: params.sessionId ?? "s1",
       sessionKey: params.sessionKey,
-      sessionFile: "/tmp/session.jsonl",
       workspaceDir,
       config: params.config,
       prompt: params.prompt ?? "hi",
@@ -252,7 +251,6 @@ describe("runCliAgent spawn path", () => {
     const context: PreparedCliRunContext = {
       params: {
         sessionId: "s1",
-        sessionFile: "/tmp/session.jsonl",
         workspaceDir: "/tmp",
         prompt: "Run: node script.mjs",
         provider: "claude-cli",
@@ -347,7 +345,9 @@ describe("runCliAgent spawn path", () => {
     let systemPromptPath = "";
     supervisorSpawnMock.mockImplementationOnce(async (...args: unknown[]) => {
       const input = (args[0] ?? {}) as { argv?: string[] };
-      systemPromptPath = requireArgAfter(input.argv, "--append-system-prompt-file");
+      const systemPromptArgIndex = input.argv?.indexOf("--append-system-prompt-file") ?? -1;
+      expect(systemPromptArgIndex).toBeGreaterThanOrEqual(0);
+      systemPromptPath = input.argv?.[systemPromptArgIndex + 1] ?? "";
       expect(systemPromptPath).toContain("openclaw-cli-system-prompt-");
       await expect(fs.readFile(systemPromptPath, "utf-8")).resolves.toBe(
         "You are a helpful assistant.",
@@ -419,8 +419,10 @@ describe("runCliAgent spawn path", () => {
     expect(resolveArgsInput.thinkingLevel).toBe("high");
     expect(resolveArgsInput.useResume).toBe(false);
     expect(resolveArgsInput.baseArgs).toEqual(["-p", "--output-format", "stream-json"]);
-    const input = mockCallArg(supervisorSpawnMock) as { argv?: string[] };
-    expect(requireArgAfter(input.argv, "--effort")).toBe("high");
+    const input = supervisorSpawnMock.mock.calls[0]?.[0] as { argv?: string[] };
+    const effortArgIndex = input.argv?.indexOf("--effort") ?? -1;
+    expect(effortArgIndex).toBeGreaterThanOrEqual(0);
+    expect(input.argv?.[effortArgIndex + 1]).toBe("high");
   });
 
   it("passes OpenClaw skills to Claude as a session plugin", async () => {
@@ -443,7 +445,9 @@ describe("runCliAgent spawn path", () => {
     let pluginDir = "";
     supervisorSpawnMock.mockImplementationOnce(async (...args: unknown[]) => {
       const input = (args[0] ?? {}) as { argv?: string[] };
-      pluginDir = requireArgAfter(input.argv, "--plugin-dir");
+      const pluginArgIndex = input.argv?.indexOf("--plugin-dir") ?? -1;
+      expect(pluginArgIndex).toBeGreaterThanOrEqual(0);
+      pluginDir = input.argv?.[pluginArgIndex + 1] ?? "";
       const manifest = JSON.parse(
         await fs.readFile(path.join(pluginDir, ".claude-plugin", "plugin.json"), "utf-8"),
       ) as { name?: string; skills?: string };
@@ -494,13 +498,7 @@ describe("runCliAgent spawn path", () => {
           },
         }),
       );
-      let accessError: unknown;
-      try {
-        await fs.access(pluginDir);
-      } catch (error) {
-        accessError = error;
-      }
-      expect((accessError as NodeJS.ErrnoException | undefined)?.code).toBe("ENOENT");
+      await expect(fs.access(pluginDir)).rejects.toMatchObject({ code: "ENOENT" });
     } finally {
       await fs.rm(workspaceDir, { recursive: true, force: true });
     }
@@ -556,7 +554,6 @@ describe("runCliAgent spawn path", () => {
   it("ignores legacy claudeSessionId on the compat wrapper", () => {
     const params = buildRunClaudeCliAgentParams({
       sessionId: "openclaw-session",
-      sessionFile: "/tmp/session.jsonl",
       workspaceDir: "/tmp",
       prompt: "hi",
       model: "opus",
@@ -571,10 +568,24 @@ describe("runCliAgent spawn path", () => {
     expect(JSON.stringify(params)).not.toContain("c9d7b831-1c31-4d22-80b9-1e50ca207d4b");
   });
 
+  it("forwards senderIsOwner through the compat wrapper", () => {
+    const params = buildRunClaudeCliAgentParams({
+      sessionId: "openclaw-session",
+      sessionKey: "agent:main:matrix:room:123",
+      workspaceDir: "/tmp",
+      prompt: "hi",
+      model: "opus",
+      timeoutMs: 1_000,
+      runId: "run-claude-owner-wrapper",
+      senderIsOwner: false,
+    });
+
+    expect(params.senderIsOwner).toBe(false);
+  });
+
   it("forwards channel context through the compat wrapper", () => {
     const params = buildRunClaudeCliAgentParams({
       sessionId: "openclaw-session",
-      sessionFile: "/tmp/session.jsonl",
       workspaceDir: "/tmp",
       prompt: "hi",
       timeoutMs: 1_000,
@@ -590,7 +601,6 @@ describe("runCliAgent spawn path", () => {
   it("forwards static extra system prompt through the compat wrapper", () => {
     const params = buildRunClaudeCliAgentParams({
       sessionId: "openclaw-session",
-      sessionFile: "/tmp/session.jsonl",
       workspaceDir: "/tmp",
       prompt: "hi",
       timeoutMs: 1_000,
@@ -606,7 +616,6 @@ describe("runCliAgent spawn path", () => {
   it("forwards cron jobId through the compat wrapper", () => {
     const params = buildRunClaudeCliAgentParams({
       sessionId: "openclaw-session",
-      sessionFile: "/tmp/session.jsonl",
       workspaceDir: "/tmp",
       prompt: "hi",
       timeoutMs: 1_000,
@@ -672,7 +681,9 @@ describe("runCliAgent spawn path", () => {
     let promptFileText = "";
     supervisorSpawnMock.mockImplementationOnce(async (...args: unknown[]) => {
       const input = (args[0] ?? {}) as { argv?: string[] };
-      const configArg = requireArgAfter(input.argv, "-c");
+      const configArgIndex = input.argv?.indexOf("-c") ?? -1;
+      expect(configArgIndex).toBeGreaterThanOrEqual(0);
+      const configArg = input.argv?.[configArgIndex + 1] ?? "";
       const match = requireRegexMatch(configArg, /^model_instructions_file="(.+)"$/);
       promptFileText = await fs.readFile(match[1], "utf-8");
       return createManagedRun({

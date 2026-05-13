@@ -1,5 +1,4 @@
-import type { AgentToolResult } from "@earendil-works/pi-agent-core";
-import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
+import type { AgentToolResult } from "openclaw/plugin-sdk/agent-core";
 import {
   createAgentToolResultMiddlewareRunner,
   createCodexAppServerToolResultExtensionRunner,
@@ -20,6 +19,7 @@ import {
   wrapToolWithBeforeToolCallHook,
 } from "openclaw/plugin-sdk/agent-harness-runtime";
 import { normalizeAgentId } from "openclaw/plugin-sdk/routing";
+import type { ImageContent, TextContent } from "openclaw/plugin-sdk/provider-ai";
 import type { CodexDynamicToolsLoading } from "./config.js";
 import { invalidInlineImageText, sanitizeInlineImageDataUrl } from "./image-payload-sanitizer.js";
 import {
@@ -330,8 +330,8 @@ function composeAbortSignals(...signals: Array<AbortSignal | undefined>): AbortS
 function collectToolTelemetry(params: {
   toolName: string;
   args: Record<string, unknown>;
-  result: AgentToolResult<unknown> | undefined;
-  mediaTrustResult?: AgentToolResult<unknown>;
+  result: AgentToolResult | undefined;
+  mediaTrustResult?: AgentToolResult;
   telemetry: CodexDynamicToolBridge["telemetry"];
   isError: boolean;
 }): void {

@@ -30,10 +30,6 @@ type ReloadRule = {
   actions?: ReloadAction[];
 };
 
-export type ConfigReloadMetadata = {
-  kind: ReloadRule["kind"];
-};
-
 type ReloadAction =
   | "reload-hooks"
   | "restart-gmail-watcher"
@@ -106,7 +102,7 @@ const BASE_RELOAD_RULES: ReloadRule[] = [
   { prefix: "cron", kind: "hot", actions: ["restart-cron"] },
   { prefix: "mcp", kind: "hot", actions: ["dispose-mcp-runtimes"] },
   { prefix: "plugins.load", kind: "restart" },
-  { prefix: "plugins.installs", kind: "restart" },
+  { prefix: "installedPluginIndex.installRecords", kind: "restart" },
 ];
 
 const BASE_RELOAD_RULES_TAIL: ReloadRule[] = [
@@ -226,39 +222,28 @@ function matchRule(path: string): ReloadRule | null {
   return null;
 }
 
-export function resolveConfigReloadMetadata(path: string): ConfigReloadMetadata {
-  if (isPluginInstallTimestampPath(path)) {
-    return { kind: "none" };
-  }
-  return { kind: matchRule(path)?.kind ?? "restart" };
+function isInstalledPluginIndexTimestampPath(path: string): boolean {
+  return /^installedPluginIndex\.installRecords\..+\.(installedAt|resolvedAt)$/.test(path);
 }
 
-function isPluginInstallTimestampPath(path: string): boolean {
-  // Legacy compatibility only: new plugin install metadata lives in the
-  // managed plugin index, but old config writes may still touch this path.
-  return /^plugins\.installs\..+\.(installedAt|resolvedAt)$/.test(path);
-}
-
-function getPluginInstallRecords(config: unknown): Record<string, unknown> {
-  if (!isPlainObject(config)) {
+function getInstalledPluginIndexRecords(state: unknown): Record<string, unknown> {
+  if (!isPlainObject(state)) {
     return {};
   }
-  const plugins = config.plugins;
-  if (!isPlainObject(plugins)) {
+  const pluginIndex = state.installedPluginIndex;
+  if (!isPlainObject(pluginIndex)) {
     return {};
   }
-  // Keep legacy config install records out of gateway restart decisions while
-  // migration/doctor moves them into the managed plugin index install records.
-  const installs = plugins.installs;
-  return isPlainObject(installs) ? installs : {};
+  const records = pluginIndex.installRecords;
+  return isPlainObject(records) ? records : {};
 }
 
-export function listPluginInstallTimestampMetadataPaths(
-  prevConfig: unknown,
-  nextConfig: unknown,
+export function listInstalledPluginIndexTimestampMetadataPaths(
+  prevState: unknown,
+  nextState: unknown,
 ): string[] {
-  const prevInstalls = getPluginInstallRecords(prevConfig);
-  const nextInstalls = getPluginInstallRecords(nextConfig);
+  const prevInstalls = getInstalledPluginIndexRecords(prevState);
+  const nextInstalls = getInstalledPluginIndexRecords(nextState);
   const ids = new Set([...Object.keys(prevInstalls), ...Object.keys(nextInstalls)]);
   const paths: string[] = [];
 
@@ -270,7 +255,7 @@ export function listPluginInstallTimestampMetadataPaths(
     }
     for (const key of ["installedAt", "resolvedAt"] as const) {
       if (prevRecord[key] !== nextRecord[key]) {
-        paths.push(`plugins.installs.${id}.${key}`);
+        paths.push(`installedPluginIndex.installRecords.${id}.${key}`);
       }
     }
   }
@@ -278,12 +263,12 @@ export function listPluginInstallTimestampMetadataPaths(
   return paths;
 }
 
-export function listPluginInstallWholeRecordPaths(
-  prevConfig: unknown,
-  nextConfig: unknown,
+export function listInstalledPluginIndexWholeRecordPaths(
+  prevState: unknown,
+  nextState: unknown,
 ): string[] {
-  const prevInstalls = getPluginInstallRecords(prevConfig);
-  const nextInstalls = getPluginInstallRecords(nextConfig);
+  const prevInstalls = getInstalledPluginIndexRecords(prevState);
+  const nextInstalls = getInstalledPluginIndexRecords(nextState);
   const ids = new Set([...Object.keys(prevInstalls), ...Object.keys(nextInstalls)]);
   const paths: string[] = [];
 
@@ -291,7 +276,7 @@ export function listPluginInstallWholeRecordPaths(
     const prevRecord = prevInstalls[id];
     const nextRecord = nextInstalls[id];
     if (!isPlainObject(prevRecord) || !isPlainObject(nextRecord)) {
-      paths.push(`plugins.installs.${id}`);
+      paths.push(`installedPluginIndex.installRecords.${id}`);
     }
   }
 
@@ -356,7 +341,7 @@ export function buildGatewayReloadPlan(
   for (const path of changedPaths) {
     const isTimestampNoop =
       !forceChangedPaths.has(path) &&
-      (noopPaths.size > 0 ? noopPaths.has(path) : isPluginInstallTimestampPath(path));
+      (noopPaths.size > 0 ? noopPaths.has(path) : isInstalledPluginIndexTimestampPath(path));
     if (isTimestampNoop) {
       plan.noopPaths.push(path);
       continue;

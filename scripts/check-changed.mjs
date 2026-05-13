@@ -30,6 +30,16 @@ const SHRINKWRAP_POLICY_PATH_RE =
   /^(?:npm-shrinkwrap\.json|package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|scripts\/generate-npm-shrinkwrap\.mjs|extensions\/[^/]+\/(?:package\.json|npm-shrinkwrap\.json))$/u;
 let corepackPnpmShimDir;
 
+const KYSELY_CODEGEN_PATHS = new Set([
+  "scripts/generate-kysely-types.mjs",
+  "src/state/openclaw-agent-db.generated.d.ts",
+  "src/state/openclaw-agent-schema.sql",
+  "src/state/openclaw-agent-schema.generated.ts",
+  "src/state/openclaw-state-db.generated.d.ts",
+  "src/state/openclaw-state-schema.sql",
+  "src/state/openclaw-state-schema.generated.ts",
+]);
+
 export function createChangedCheckChildEnv(baseEnv = process.env) {
   const resolvedBaseEnv = resolveLocalHeavyCheckEnv(baseEnv);
   return {
@@ -169,6 +179,9 @@ export function createChangedCheckPlan(result, options = {}) {
     add("npm shrinkwrap guard", ["deps:shrinkwrap:check"]);
   }
   add("package patch guard", ["deps:patches:check"]);
+  if (result.paths.some((changedPath) => KYSELY_CODEGEN_PATHS.has(changedPath))) {
+    add("Kysely generated database types", ["db:kysely:check"]);
+  }
 
   if (result.docsOnly) {
     return {

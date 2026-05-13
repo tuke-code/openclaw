@@ -1,8 +1,7 @@
 import { parseExplicitTargetForLoadedChannel } from "../../channels/plugins/target-parsing-loaded.js";
 import type { ChannelId } from "../../channels/plugins/types.public.js";
 import { resolveAgentMainSessionKey } from "../../config/sessions/main-session.js";
-import { resolveStorePath } from "../../config/sessions/paths.js";
-import { readSessionEntry } from "../../config/sessions/store-load.js";
+import { getSessionEntry } from "../../config/sessions/store.js";
 import type { SessionEntry } from "../../config/sessions/types.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { formatErrorMessage } from "../../infra/errors.js";
@@ -129,9 +128,7 @@ export async function resolveDeliveryTarget(
   const explicitTo = typeof jobPayload.to === "string" ? jobPayload.to : undefined;
   const allowMismatchedLastTo = requestedChannel === "last";
 
-  const sessionCfg = cfg.session;
   const mainSessionKey = resolveAgentMainSessionKey({ cfg, agentId });
-  const storePath = resolveStorePath(sessionCfg?.store, { agentId });
 
   // Look up thread-specific session first (e.g. agent:main:main:thread:1234),
   // then fall back to the main session entry.
@@ -156,10 +153,10 @@ export async function resolveDeliveryTarget(
       } satisfies SessionEntry)
     : undefined;
   const threadEntry = threadSessionKey
-    ? (readSessionEntry(storePath, threadSessionKey) as SessionEntry | undefined)
+    ? getSessionEntry({ agentId, sessionKey: threadSessionKey })
     : undefined;
-  const mainEntry = readSessionEntry(storePath, mainSessionKey) as SessionEntry | undefined;
-  const main = storedDeliveryEntry ?? threadEntry ?? mainEntry;
+  const main =
+    storedDeliveryEntry ?? threadEntry ?? getSessionEntry({ agentId, sessionKey: mainSessionKey });
 
   const preliminary = resolveSessionDeliveryTarget({
     entry: main,

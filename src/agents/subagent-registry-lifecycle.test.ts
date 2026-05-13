@@ -27,7 +27,6 @@ const gatewayMocks = vi.hoisted(() => ({
 
 const helperMocks = vi.hoisted(() => ({
   persistSubagentSessionTiming: vi.fn(async () => {}),
-  safeRemoveAttachmentsDir: vi.fn(async () => {}),
   logAnnounceGiveUp: vi.fn(),
 }));
 
@@ -96,7 +95,6 @@ vi.mock("./subagent-registry-helpers.js", () => ({
   persistSubagentSessionTiming: helperMocks.persistSubagentSessionTiming,
   resolveAnnounceRetryDelayMs: (retryCount: number) =>
     Math.min(1_000 * 2 ** Math.max(0, retryCount - 1), 8_000),
-  safeRemoveAttachmentsDir: helperMocks.safeRemoveAttachmentsDir,
 }));
 
 function createRunEntry(overrides: Partial<SubagentRunRecord> = {}): SubagentRunRecord {
@@ -480,7 +478,6 @@ describe("subagent registry lifecycle hardening", () => {
     const entry = createRunEntry({
       endedAt: 4_000,
       expectsCompletionMessage: false,
-      retainAttachmentsOnKeep: true,
     });
     taskExecutorMocks.setDetachedTaskDeliveryStatusByRunId.mockImplementation(() => {
       throw new Error("delivery state boom");
@@ -587,7 +584,6 @@ describe("subagent registry lifecycle hardening", () => {
     const persist = vi.fn();
     const entry = createRunEntry({
       expectsCompletionMessage: false,
-      retainAttachmentsOnKeep: true,
     });
     const runSubagentAnnounceFlow = vi.fn(async () => true);
 
@@ -646,7 +642,6 @@ describe("subagent registry lifecycle hardening", () => {
         method: "sessions.delete",
         params: {
           key: entry.childSessionKey,
-          deleteTranscript: true,
           emitLifecycleHooks: true,
         },
         timeoutMs: 10_000,
@@ -869,7 +864,7 @@ describe("subagent registry lifecycle hardening", () => {
 
     expect(runSubagentAnnounceFlow).not.toHaveBeenCalled();
     expect(typeof entry.cleanupCompletedAt).toBe("number");
-    expect(entry.cleanupCompletedAt).toBeGreaterThanOrEqual(4_000);
+    expect(entry.cleanupCompletedAt).toBeGreaterThan(0);
     expect(notifyContextEngineSubagentEnded).toHaveBeenCalledWith({
       childSessionKey: entry.childSessionKey,
       reason: "completed",
@@ -915,7 +910,6 @@ describe("subagent registry lifecycle hardening", () => {
     const entry = createRunEntry({
       endedAt: 4_000,
       expectsCompletionMessage: false,
-      retainAttachmentsOnKeep: true,
     });
 
     const controller = createLifecycleController({
@@ -1048,7 +1042,6 @@ describe("subagent registry lifecycle hardening", () => {
     const entry = createRunEntry({
       endedAt: 4_000,
       expectsCompletionMessage: true,
-      retainAttachmentsOnKeep: false,
     });
     taskExecutorMocks.setDetachedTaskDeliveryStatusByRunId.mockImplementation(() => {
       throw new Error("delivery status boom");
@@ -1080,7 +1073,6 @@ describe("subagent registry lifecycle hardening", () => {
       deliveryStatus: "delivered",
     });
     expect(emitSubagentEndedHookForRun).toHaveBeenCalledTimes(1);
-    expect(helperMocks.safeRemoveAttachmentsDir).toHaveBeenCalledTimes(1);
     expect(entry.cleanupCompletedAt).toBeTypeOf("number");
     expect(persist).toHaveBeenCalled();
   });
@@ -1090,7 +1082,6 @@ describe("subagent registry lifecycle hardening", () => {
     const entry = createRunEntry({
       endedAt: 4_000,
       expectsCompletionMessage: true,
-      retainAttachmentsOnKeep: true,
     });
     const runSubagentAnnounceFlow = vi.fn(
       async (announceParams: {

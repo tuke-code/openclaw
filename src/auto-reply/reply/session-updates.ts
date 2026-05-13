@@ -1,5 +1,4 @@
 import crypto from "node:crypto";
-import path from "node:path";
 import { resolveSessionAgentId } from "../../agents/agent-scope.js";
 import { canExecRequestNode } from "../../agents/exec-defaults.js";
 import { buildWorkspaceSkillSnapshot, type SkillSnapshot } from "../../agents/skills.js";
@@ -12,24 +11,20 @@ import { ensureSkillsWatcher } from "../../agents/skills/refresh.js";
 import { hydrateResolvedSkills } from "../../agents/skills/snapshot-hydration.js";
 import { stableStringify } from "../../agents/stable-stringify.js";
 import {
-  canonicalizeAbsoluteSessionFilePath,
-  resolveSessionFilePath,
-  resolveSessionFilePathOptions,
-  rewriteSessionFileForNewSessionId,
+  getSessionEntry,
+  mergeSessionEntry,
   type SessionEntry,
-  updateSessionStore,
+  upsertSessionEntry,
 } from "../../config/sessions.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import {
   forgetActiveSessionForShutdown,
   noteActiveSessionForShutdown,
 } from "../../gateway/active-sessions-shutdown-tracker.js";
-import { resolveStableSessionEndTranscript } from "../../gateway/session-transcript-files.fs.js";
 import { logVerbose } from "../../globals.js";
 import { getRemoteSkillEligibility } from "../../infra/skills-remote.js";
 import { getGlobalHookRunner } from "../../plugins/hook-runner-global.js";
 import { resolveAgentIdFromSessionKey } from "../../routing/session-key.js";
-import { normalizeOptionalString } from "../../shared/string-coerce.js";
 import { buildSessionEndHookPayload, buildSessionStartHookPayload } from "./session-hooks.js";
 export { drainFormattedSystemEvents } from "./session-system-events.js";
 
@@ -120,14 +115,13 @@ function cacheResolvedSkills(cacheKey: string, snapshot: SkillSnapshot): SkillSn
 }
 
 // nextEntry.skillsSnapshot may carry resolvedSkills (full Skill[] with
-// SKILL.md bodies) for in-turn use. The persistence layer in
-// src/config/sessions/store-load.ts strips resolvedSkills before serializing,
-// so the on-disk sessions.json stays small. The in-memory params.sessionStore
-// reference still carries the runtime cache for the rest of this turn.
+// SKILL.md bodies) for in-turn use. The SQLite session row store strips
+// resolvedSkills before serializing, so the persisted row stays small. The
+// in-memory params.sessionStore reference still carries the runtime cache for
+// the rest of this turn.
 async function persistSessionEntryUpdate(params: {
   sessionStore?: Record<string, SessionEntry>;
   sessionKey?: string;
-  storePath?: string;
   nextEntry: SessionEntry;
 }) {
   if (!params.sessionStore || !params.sessionKey) {
@@ -137,31 +131,33 @@ async function persistSessionEntryUpdate(params: {
     ...params.sessionStore[params.sessionKey],
     ...params.nextEntry,
   };
-  if (!params.storePath) {
+  const agentId = resolveAgentIdFromSessionKey(params.sessionKey);
+  if (!agentId) {
     return;
   }
-  await updateSessionStore(params.storePath, (store) => {
-    store[params.sessionKey!] = { ...store[params.sessionKey!], ...params.nextEntry };
+  upsertSessionEntry({
+    agentId,
+    sessionKey: params.sessionKey,
+    entry: mergeSessionEntry(getSessionEntry({ agentId, sessionKey: params.sessionKey }), {
+      ...params.nextEntry,
+    }),
   });
 }
 
 function emitCompactionSessionLifecycleHooks(params: {
   cfg: OpenClawConfig;
   sessionKey: string;
-  storePath?: string;
   previousEntry: SessionEntry;
   nextEntry: SessionEntry;
 }) {
   if (params.previousEntry.sessionId) {
     forgetActiveSessionForShutdown(params.previousEntry.sessionId);
   }
-  if (params.nextEntry.sessionId && params.storePath) {
+  if (params.nextEntry.sessionId) {
     noteActiveSessionForShutdown({
       cfg: params.cfg,
       sessionKey: params.sessionKey,
       sessionId: params.nextEntry.sessionId,
-      storePath: params.storePath,
-      sessionFile: params.nextEntry.sessionFile,
       agentId: resolveAgentIdFromSessionKey(params.sessionKey),
     });
   }
@@ -171,19 +167,11 @@ function emitCompactionSessionLifecycleHooks(params: {
   }
 
   if (hookRunner.hasHooks("session_end")) {
-    const transcript = resolveStableSessionEndTranscript({
-      sessionId: params.previousEntry.sessionId,
-      storePath: params.storePath,
-      sessionFile: params.previousEntry.sessionFile,
-      agentId: resolveAgentIdFromSessionKey(params.sessionKey),
-    });
     const payload = buildSessionEndHookPayload({
       sessionId: params.previousEntry.sessionId,
       sessionKey: params.sessionKey,
       cfg: params.cfg,
       reason: "compaction",
-      sessionFile: transcript.sessionFile,
-      transcriptArchived: transcript.transcriptArchived,
       nextSessionId: params.nextEntry.sessionId,
     });
     void hookRunner.runSessionEnd(payload.event, payload.context).catch((err) => {
@@ -214,7 +202,6 @@ export async function ensureSkillSnapshot(params: {
   sessionEntry?: SessionEntry;
   sessionStore?: Record<string, SessionEntry>;
   sessionKey?: string;
-  storePath?: string;
   sessionId?: string;
   isFirstTurnInSession: boolean;
   workspaceDir: string;
@@ -227,7 +214,7 @@ export async function ensureSkillSnapshot(params: {
   systemSent: boolean;
 }> {
   if (process.env.OPENCLAW_TEST_FAST === "1") {
-    // In fast unit-test runs we skip filesystem scanning, watchers, and session-store writes.
+    // In fast unit-test runs we skip filesystem scanning, watchers, and SQLite session-row writes.
     // Dedicated skills tests cover snapshot generation behavior.
     return {
       sessionEntry: params.sessionEntry,
@@ -240,7 +227,6 @@ export async function ensureSkillSnapshot(params: {
     sessionEntry,
     sessionStore,
     sessionKey,
-    storePath,
     sessionId,
     isFirstTurnInSession,
     workspaceDir,
@@ -311,7 +297,7 @@ export async function ensureSkillSnapshot(params: {
       systemSent: true,
       skillsSnapshot: skillSnapshot,
     };
-    await persistSessionEntryUpdate({ sessionStore, sessionKey, storePath, nextEntry });
+    await persistSessionEntryUpdate({ sessionStore, sessionKey, nextEntry });
     systemSent = true;
   }
 
@@ -341,7 +327,7 @@ export async function ensureSkillSnapshot(params: {
       updatedAt: Date.now(),
       skillsSnapshot,
     };
-    await persistSessionEntryUpdate({ sessionStore, sessionKey, storePath, nextEntry });
+    await persistSessionEntryUpdate({ sessionStore, sessionKey, nextEntry });
   }
 
   return { sessionEntry: nextEntry, skillsSnapshot, systemSent };
@@ -351,7 +337,6 @@ export async function incrementCompactionCount(params: {
   sessionEntry?: SessionEntry;
   sessionStore?: Record<string, SessionEntry>;
   sessionKey?: string;
-  storePath?: string;
   cfg?: OpenClawConfig;
   now?: number;
   amount?: number;
@@ -359,20 +344,16 @@ export async function incrementCompactionCount(params: {
   tokensAfter?: number;
   /** Session id after compaction, when the runtime rotated transcripts. */
   newSessionId?: string;
-  /** Session file after compaction, when the runtime rotated transcripts. */
-  newSessionFile?: string;
 }): Promise<number | undefined> {
   const {
     sessionEntry,
     sessionStore,
     sessionKey,
-    storePath,
     cfg,
     now = Date.now(),
     amount = 1,
     tokensAfter,
     newSessionId,
-    newSessionFile,
   } = params;
   if (!sessionStore || !sessionKey) {
     return undefined;
@@ -388,27 +369,13 @@ export async function incrementCompactionCount(params: {
     compactionCount: nextCount,
     updatedAt: now,
   };
-  const explicitNewSessionFile = normalizeOptionalString(newSessionFile);
   const sessionIdChanged = Boolean(newSessionId && newSessionId !== entry.sessionId);
-  const sessionFileChanged = Boolean(
-    explicitNewSessionFile && explicitNewSessionFile !== entry.sessionFile,
-  );
   if (sessionIdChanged && newSessionId) {
     updates.sessionId = newSessionId;
-    updates.sessionFile =
-      explicitNewSessionFile ??
-      resolveCompactionSessionFile({
-        entry,
-        sessionKey,
-        storePath,
-        newSessionId,
-      });
     updates.usageFamilyKey = entry.usageFamilyKey ?? sessionKey;
     updates.usageFamilySessionIds = Array.from(
       new Set([...(entry.usageFamilySessionIds ?? []), entry.sessionId, newSessionId]),
     );
-  } else if (sessionFileChanged && explicitNewSessionFile) {
-    updates.sessionFile = explicitNewSessionFile;
   }
   // If tokensAfter is provided, update the cached token counts to reflect post-compaction state
   const tokensAfterCompaction = resolveNonNegativeTokenCount(tokensAfter);
@@ -427,49 +394,25 @@ export async function incrementCompactionCount(params: {
     ...entry,
     ...updates,
   };
-  if (storePath) {
-    await updateSessionStore(storePath, (store) => {
-      store[sessionKey] = {
-        ...store[sessionKey],
+  const agentId =
+    resolveAgentIdFromSessionKey(sessionKey) ??
+    (cfg ? resolveSessionAgentId({ sessionKey, config: cfg }) : undefined);
+  if (agentId) {
+    upsertSessionEntry({
+      agentId,
+      sessionKey,
+      entry: mergeSessionEntry(getSessionEntry({ agentId, sessionKey }), {
         ...updates,
-      };
+      }),
     });
   }
-  if ((sessionIdChanged || sessionFileChanged) && cfg) {
+  if (sessionIdChanged && cfg) {
     emitCompactionSessionLifecycleHooks({
       cfg,
       sessionKey,
-      storePath,
       previousEntry: entry,
       nextEntry: sessionStore[sessionKey],
     });
   }
   return nextCount;
-}
-
-function resolveCompactionSessionFile(params: {
-  entry: SessionEntry;
-  sessionKey: string;
-  storePath?: string;
-  newSessionId: string;
-}): string {
-  const agentId = resolveAgentIdFromSessionKey(params.sessionKey);
-  const pathOpts = resolveSessionFilePathOptions({
-    agentId,
-    storePath: params.storePath,
-  });
-  const rewrittenSessionFile = rewriteSessionFileForNewSessionId({
-    sessionFile: params.entry.sessionFile,
-    previousSessionId: params.entry.sessionId,
-    nextSessionId: params.newSessionId,
-  });
-  const normalizedRewrittenSessionFile =
-    rewrittenSessionFile && path.isAbsolute(rewrittenSessionFile)
-      ? canonicalizeAbsoluteSessionFilePath(rewrittenSessionFile)
-      : rewrittenSessionFile;
-  return resolveSessionFilePath(
-    params.newSessionId,
-    normalizedRewrittenSessionFile ? { sessionFile: normalizedRewrittenSessionFile } : undefined,
-    pathOpts,
-  );
 }

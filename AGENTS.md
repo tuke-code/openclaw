@@ -116,6 +116,9 @@ Skills own workflows; root owns hard policy and routing.
 - Calls should be boring: complex decisions happen above; call args/object fields are names, literals, or simple property reads.
 - Prefer early returns over nested condition pyramids. Split code into gather -> normalize -> decide -> act.
 - Use named intermediates only for domain meaning or readability; avoid temp-variable soup.
+- Storage adapters: quarantine schema/nullability mess at the boundary. Use one named mapper from domain object to DB row, one mapper from DB row to domain object, and keep read/write paths boring.
+- Discriminated unions: use exhaustive `switch` mappers instead of repeated inline conditionals. If insert/update share shape, build the row once and reuse it; split primary keys once for update sets.
+- Kysely rows: prefer generated `Insertable`/`Selectable` types for mapper contracts. Do not duplicate nullable-column logic inside `values(...)` and `doUpdateSet(...)`.
 - Dynamic import: no static+dynamic import for same prod module. Use `*.runtime.ts` lazy boundary. After edits: `pnpm build`; check `[INEFFECTIVE_DYNAMIC_IMPORT]`.
 - Cycles: keep `pnpm check:import-cycles` + architecture/madge green.
 - Classes: no prototype mixins/mutations. Prefer inheritance/composition. Tests prefer per-instance stubs.

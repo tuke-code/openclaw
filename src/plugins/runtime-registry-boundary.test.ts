@@ -8,7 +8,7 @@ import { listGitTrackedFiles, toRepoRelativePath } from "../test-utils/repo-file
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const allowedRuntimeResolverRefs = new Set([
-  "src/commands/doctor.e2e-harness.ts",
+  "src/commands/doctor/e2e-harness.ts",
   "src/infra/outbound/channel-bootstrap.runtime.ts",
   "src/plugins/capability-provider-runtime.ts",
   "src/plugins/loader.ts",

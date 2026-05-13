@@ -28,7 +28,10 @@ import {
 import { resolvePreferredOpenClawTmpDir } from "../tmp-openclaw-dir.js";
 
 const mocks = vi.hoisted(() => ({
-  appendAssistantMessageToSessionTranscript: vi.fn(async () => ({ ok: true, sessionFile: "x" })),
+  appendAssistantMessageToSessionTranscript: vi.fn(async () => ({
+    ok: true,
+    messageId: "mirror-message",
+  })),
 }));
 const hookMocks = vi.hoisted(() => ({
   runner: {
@@ -741,7 +744,7 @@ describe("deliverOutboundPayloads", () => {
       queuePolicy: "required",
     });
 
-    expect(results).toStrictEqual([]);
+    expect(results).toEqual([]);
     expect(sendMatrix).not.toHaveBeenCalled();
     expect(queueMocks.markDeliveryPlatformSendAttemptStarted).not.toHaveBeenCalled();
     expect(queueMocks.markDeliveryPlatformOutcomeUnknown).not.toHaveBeenCalled();
@@ -1483,7 +1486,7 @@ describe("deliverOutboundPayloads", () => {
       payloads: [{ text: "redact me" }],
     });
 
-    expect(results).toStrictEqual([]);
+    expect(results).toEqual([]);
     expect(sendText).not.toHaveBeenCalled();
   });
 
@@ -2241,7 +2244,7 @@ describe("deliverOutboundPayloads", () => {
     });
 
     expect(sendMatrix).not.toHaveBeenCalled();
-    expect(results).toStrictEqual([]);
+    expect(results).toEqual([]);
   });
 
   it("drops plugin HTML-only text payloads after sanitization", async () => {
@@ -2255,7 +2258,7 @@ describe("deliverOutboundPayloads", () => {
     });
 
     expect(sendMatrix).not.toHaveBeenCalled();
-    expect(results).toStrictEqual([]);
+    expect(results).toEqual([]);
   });
 
   it("preserves fenced blocks for markdown chunkers in newline mode", async () => {
@@ -2341,9 +2344,12 @@ describe("deliverOutboundPayloads", () => {
     });
 
     expect(chunker).toHaveBeenCalledWith("**bold**", 4000);
-    const sendTextParams = requireMockCallArg(sendText, "sendText");
-    expect(sendTextParams.text).toBe("<b>bold</b>");
-    expect(sendTextParams.formatting).toEqual({ parseMode: "HTML" });
+    expect(sendText).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: "<b>bold</b>",
+        formatting: { parseMode: "HTML" },
+      }),
+    );
   });
 
   it("passes config through for plugin media sends", async () => {
@@ -2830,7 +2836,7 @@ describe("deliverOutboundPayloads", () => {
       deps: { matrix: sendMatrix },
     });
 
-    expect(results).toStrictEqual([]);
+    expect(results).toEqual([]);
     expect(sendMatrix).not.toHaveBeenCalled();
     expect(queueMocks.ackDelivery).not.toHaveBeenCalled();
     expect(queueMocks.failDelivery).not.toHaveBeenCalled();
@@ -3088,7 +3094,7 @@ describe("deliverOutboundPayloads", () => {
       },
     });
 
-    expect(results).toStrictEqual([]);
+    expect(results).toEqual([]);
     expect(sendPayload).toHaveBeenCalledTimes(1);
     expect(sendText).not.toHaveBeenCalled();
     expect(hookMocks.runner.runMessageSent).not.toHaveBeenCalled();

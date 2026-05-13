@@ -98,10 +98,6 @@ const loadPluginLookUpTable = vi.hoisted(() =>
   })),
 );
 const resolveOpenClawPackageRootSync = vi.hoisted(() => vi.fn((_params: unknown) => "/package"));
-const runChannelPluginStartupMaintenance = vi.hoisted(() =>
-  vi.fn(async (_params: unknown) => undefined),
-);
-const runStartupSessionMigration = vi.hoisted(() => vi.fn(async (_params: unknown) => undefined));
 vi.mock("../agents/agent-scope.js", () => ({
   resolveAgentWorkspaceDir: () => "/workspace",
   resolveDefaultAgentId: () => "default",
@@ -109,11 +105,6 @@ vi.mock("../agents/agent-scope.js", () => ({
 
 vi.mock("../agents/subagent-registry.js", () => ({
   initSubagentRegistry: () => initSubagentRegistry(),
-}));
-
-vi.mock("../channels/plugins/lifecycle-startup.js", () => ({
-  runChannelPluginStartupMaintenance: (params: unknown) =>
-    runChannelPluginStartupMaintenance(params),
 }));
 
 vi.mock("../config/plugin-auto-enable.js", () => ({
@@ -153,10 +144,6 @@ vi.mock("./server-plugin-bootstrap.js", () => ({
   loadGatewayStartupPlugins: (params: unknown) => loadGatewayStartupPlugins(params),
 }));
 
-vi.mock("./server-startup-session-migration.js", () => ({
-  runStartupSessionMigration: (params: unknown) => runStartupSessionMigration(params),
-}));
-
 function createLog() {
   return {
     info: vi.fn(),
@@ -188,8 +175,6 @@ describe("prepareGatewayPluginBootstrap startup plugins", () => {
       metrics: pluginLookUpTableMetrics,
     });
     resolveOpenClawPackageRootSync.mockClear().mockReturnValue("/package");
-    runChannelPluginStartupMaintenance.mockClear();
-    runStartupSessionMigration.mockClear();
   });
   it("derives startup activation from source config instead of runtime plugin defaults", async () => {
     const sourceConfig = {

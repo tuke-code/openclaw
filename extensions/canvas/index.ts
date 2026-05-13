@@ -109,14 +109,19 @@ export default definePluginEntry({
           await httpRouteHandler?.close();
         },
       });
-      let resolveCanvasHttpPathToLocalPathPromise:
-        | Promise<(typeof import("./src/documents.js"))["resolveCanvasHttpPathToLocalPath"]>
+      let resolveCanvasHttpPathToMaterializedLocalPathPromise:
+        | Promise<
+            (typeof import("./src/documents.js"))["resolveCanvasHttpPathToMaterializedLocalPath"]
+          >
         | undefined;
       api.registerHostedMediaResolver(async (mediaUrl) => {
-        resolveCanvasHttpPathToLocalPathPromise ??= import("./src/documents.js").then(
-          ({ resolveCanvasHttpPathToLocalPath }) => resolveCanvasHttpPathToLocalPath,
+        resolveCanvasHttpPathToMaterializedLocalPathPromise ??= import("./src/documents.js").then(
+          ({ resolveCanvasHttpPathToMaterializedLocalPath }) =>
+            resolveCanvasHttpPathToMaterializedLocalPath,
         );
-        return (await resolveCanvasHttpPathToLocalPathPromise)(mediaUrl);
+        return await (
+          await resolveCanvasHttpPathToMaterializedLocalPathPromise
+        )(mediaUrl);
       });
     }
     api.registerNodeInvokePolicy({
