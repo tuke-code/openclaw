@@ -21,6 +21,7 @@ import {
   resolveSlackThreadHistoryFilterPolicy,
   shouldIncludeBotThreadStarterContext,
 } from "./prepare-thread-context-root.js";
+import { prependSlackSenderMetadata } from "./sender-metadata.js";
 
 type SlackMediaModule = typeof import("../media.js");
 let slackMediaModulePromise: Promise<SlackMediaModule> | undefined;
@@ -110,6 +111,7 @@ export async function resolveSlackThreadContextData(params: {
     typeof import("openclaw/plugin-sdk/channel-inbound").resolveEnvelopeFormatOptions
   >;
   effectiveDirectMedia: SlackMediaResult[] | null;
+  senderMetadataPrefixEnabled?: boolean;
 }): Promise<SlackThreadContextData> {
   const botIdentity = {
     botUserId: params.ctx.botUserId,
@@ -136,7 +138,9 @@ export async function resolveSlackThreadContextData(params: {
 
   const starter = params.threadStarter;
   const starterSenderName =
-    params.allowNameMatching && params.allowFromLower.length > 0 && starter?.userId
+    starter?.userId &&
+    (params.senderMetadataPrefixEnabled ||
+      (params.allowNameMatching && params.allowFromLower.length > 0))
       ? (await params.ctx.resolveUserName(starter.userId))?.name
       : undefined;
   const starterIsCurrentBot = Boolean(
@@ -166,7 +170,11 @@ export async function resolveSlackThreadContextData(params: {
       }));
 
   if (starter?.text && includeStarterContext) {
-    threadStarterBody = starter.text;
+    threadStarterBody = prependSlackSenderMetadata(starter.text, {
+      enabled: params.senderMetadataPrefixEnabled === true,
+      senderId: starter.userId ?? starter.botId,
+      senderName: starterSenderName,
+    });
     const snippet = starter.text.replace(/\s+/g, " ").slice(0, 80);
     threadLabel = `Slack thread ${params.roomLabel}${snippet ? `: ${snippet}` : ""}`;
     if (!params.effectiveDirectMedia && starter.files && starter.files.length > 0) {
@@ -302,12 +310,17 @@ export async function resolveSlackThreadContextData(params: {
           ? "Bot (this assistant)"
           : (msgUser?.name ?? (historyMsg.botId ? `Bot (${historyMsg.botId})` : "Unknown"));
         const msgWithId = `${historyMsg.text}\n[slack message id: ${historyMsg.ts ?? "unknown"} channel: ${params.message.channel}]`;
+        const bodyWithSenderMetadata = prependSlackSenderMetadata(msgWithId, {
+          enabled: params.senderMetadataPrefixEnabled === true,
+          senderId: historyMsg.userId ?? historyMsg.botId,
+          senderName: msgSenderName,
+        });
         historyParts.push(
           formatInboundEnvelope({
             channel: "Slack",
             from: `${msgSenderName} (${role})`,
             timestamp: historyMsg.ts ? Math.round(Number(historyMsg.ts) * 1000) : undefined,
-            body: msgWithId,
+            body: bodyWithSenderMetadata,
             chatType: "channel",
             envelope: params.envelopeOptions,
           }),

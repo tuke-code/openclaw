@@ -85,6 +85,10 @@ export const slackChannelConfigUiHints = {
     label: "Slack Interactive Replies",
     help: "Enable agent-authored Slack interactive reply directives (`[[slack_buttons: ...]]`, `[[slack_select: ...]]`). Default: false.",
   },
+  groupSenderMetadataPrefix: {
+    label: "Slack Group Sender Metadata Prefix",
+    help: "Prefix Slack group/channel prompt text with compact sender metadata so durable transcripts preserve which workspace member authored each message. Default: false.",
+  },
   execApprovals: {
     label: "Slack Exec Approvals",
     help: "Slack-native exec approval routing and approver authorization. When unset, OpenClaw auto-enables DM-first native approvals if approvers can be resolved for this workspace account.",

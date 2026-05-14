@@ -64,6 +64,7 @@ import { resolveSlackMessageContent } from "./prepare-content.js";
 import { resolveSlackDmHistoryContext, resolveSlackDmHistoryLimit } from "./prepare-dm-history.js";
 import { resolveSlackRoutingContext } from "./prepare-routing.js";
 import { resolveSlackThreadContextData } from "./prepare-thread-context.js";
+import { prependSlackSenderMetadata } from "./sender-metadata.js";
 import { isSlackSubteamMentionForBot } from "./subteam-mentions.js";
 import type { PreparedSlackMessage } from "./types.js";
 
@@ -407,6 +408,11 @@ export async function prepareSlackMessage(params: {
     allowBotsMode,
     isBotMessage,
   } = conversation;
+  const groupSenderMetadataPrefixEnabled =
+    isRoomish &&
+    (account.config?.groupSenderMetadataPrefix ??
+      cfg.channels?.slack?.groupSenderMetadataPrefix ??
+      false);
   const authorization = await authorizeSlackInboundMessage({
     ctx,
     account,
@@ -701,14 +707,19 @@ export async function prepareSlackMessage(params: {
       ? `[Slack file: ${formatSlackFileReference(message.files[0])}]`
       : "";
     const pendingBody = pendingText || fallbackFile;
+    const pendingSenderName = pendingBody ? await resolveSenderName() : undefined;
     recordPendingHistoryEntryIfEnabled({
       historyMap: ctx.channelHistories,
       historyKey,
       limit: ctx.historyLimit,
       entry: pendingBody
         ? {
-            sender: await resolveSenderName(),
-            body: pendingBody,
+            sender: pendingSenderName ?? senderId,
+            body: prependSlackSenderMetadata(pendingBody, {
+              enabled: groupSenderMetadataPrefixEnabled,
+              senderId,
+              senderName: pendingSenderName,
+            }),
             timestamp: message.ts ? Math.round(Number(message.ts) * 1000) : undefined,
             messageId: message.ts,
           }
@@ -794,6 +805,11 @@ export async function prepareSlackMessage(params: {
 
   const roomLabel = channelName ? `#${channelName}` : `#${message.channel}`;
   const senderName = await resolveSenderName();
+  const bodyForAgent = prependSlackSenderMetadata(rawBody, {
+    enabled: groupSenderMetadataPrefixEnabled,
+    senderId,
+    senderName,
+  });
   const preview = rawBody.replace(/\s+/g, " ").slice(0, 160);
   const inboundLabel = isDirectMessage
     ? `Slack DM from ${senderName}`
@@ -912,6 +928,7 @@ export async function prepareSlackMessage(params: {
     contextVisibilityMode,
     envelopeOptions,
     effectiveDirectMedia,
+    senderMetadataPrefixEnabled: groupSenderMetadataPrefixEnabled,
   });
 
   // Use direct media (including forwarded attachment media) if available, else thread starter media
@@ -930,7 +947,7 @@ export async function prepareSlackMessage(params: {
 
   const ctxPayload = finalizeInboundContext({
     Body: combinedBody,
-    BodyForAgent: rawBody,
+    BodyForAgent: bodyForAgent,
     InboundHistory: inboundHistory,
     RawBody: rawBody,
     CommandBody: commandBody,
@@ -994,7 +1011,11 @@ export async function prepareSlackMessage(params: {
       limit: ctx.historyLimit,
       entry: {
         sender: senderName,
-        body: rawBody,
+        body: prependSlackSenderMetadata(rawBody, {
+          enabled: groupSenderMetadataPrefixEnabled,
+          senderId,
+          senderName,
+        }),
         timestamp: message.ts ? Math.round(Number(message.ts) * 1000) : undefined,
         messageId: message.ts,
       },

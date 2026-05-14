@@ -134,6 +134,48 @@ describe("resolveSlackThreadContextData", () => {
     expect(result.threadHistoryBody).not.toContain("current message");
   });
 
+  it("prefixes thread starter and history with sender metadata when enabled", async () => {
+    const { storePath } = storeFixture.makeTmpStorePath();
+    const replies = vi.fn().mockResolvedValue({
+      messages: [
+        { text: "starter from Alice", user: "U1", ts: "100.000" },
+        { text: "follow-up from Alice", user: "U1", ts: "100.800" },
+        { text: "current message", user: "U1", ts: "101.000" },
+      ],
+      response_metadata: { next_cursor: "" },
+    });
+    const ctx = createThreadContext({ replies });
+    ctx.resolveUserName = async () => ({ name: "Alice" });
+
+    const result = await resolveSlackThreadContextData({
+      ctx,
+      account: createSlackTestAccount({ thread: { initialHistoryLimit: 20 } }),
+      message: createThreadMessage(),
+      isThreadReply: true,
+      threadTs: "100.000",
+      threadStarter: { text: "starter from Alice", userId: "U1", ts: "100.000" },
+      roomLabel: "#general",
+      storePath,
+      sessionKey: "thread-session-metadata-prefix",
+      allowFromLower: [],
+      allowNameMatching: false,
+      contextVisibilityMode: "all",
+      envelopeOptions: resolveEnvelopeFormatOptions({} as OpenClawConfig),
+      effectiveDirectMedia: null,
+      senderMetadataPrefixEnabled: true,
+    });
+
+    expect(result.threadStarterBody).toBe(
+      'Sender (untrusted metadata): {"id":"U1","name":"Alice"}\nstarter from Alice',
+    );
+    expect(result.threadHistoryBody).toContain(
+      'Sender (untrusted metadata): {"id":"U1","name":"Alice"}\nstarter from Alice',
+    );
+    expect(result.threadHistoryBody).toContain(
+      'Sender (untrusted metadata): {"id":"U1","name":"Alice"}\nfollow-up from Alice',
+    );
+  });
+
   it("keeps starter text and history when allowNameMatching authorizes the sender", async () => {
     const { result } = await resolveAllowlistedThreadContext({
       repliesMessages: [

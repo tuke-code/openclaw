@@ -166,6 +166,8 @@ export type SlackAccountConfig = {
   groupPolicy?: GroupPolicy;
   /** Supplemental context visibility policy (all|allowlist|allowlist_quote). */
   contextVisibility?: ContextVisibilityMode;
+  /** If true, prefix Slack group/channel prompt text with compact sender metadata for durable multi-speaker attribution. Default: false. */
+  groupSenderMetadataPrefix?: boolean;
   /** Max channel messages to keep as history context (0 disables). */
   historyLimit?: number;
   /** Max DM turns to keep as history context. */

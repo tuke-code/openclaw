@@ -2239,10 +2239,15 @@ describe("prepareSlackMessage sender prefix", () => {
     } as unknown as SlackMonitorContext;
   }
 
-  async function prepareSenderPrefixMessage(ctx: SlackMonitorContext, text: string, ts: string) {
+  async function prepareSenderPrefixMessage(
+    ctx: SlackMonitorContext,
+    text: string,
+    ts: string,
+    accountConfig: Record<string, unknown> = {},
+  ) {
     return prepareSlackMessage({
       ctx,
-      account: { accountId: "default", config: {}, replyToMode: "off" } as never,
+      account: { accountId: "default", config: accountConfig, replyToMode: "off" } as never,
       message: {
         type: "message",
         channel: "C1",
@@ -2271,6 +2276,177 @@ describe("prepareSlackMessage sender prefix", () => {
     const body = result.ctxPayload.Body;
     expect(body).toContain("Alice (U1): <@BOT> (Bek) hello");
     expect(result.ctxPayload.RawBody).toBe("<@BOT> (Bek) hello");
+  });
+
+  it("prefixes group BodyForAgent with compact sender metadata when enabled", async () => {
+    const ctx = createSenderPrefixCtx({
+      channels: { groupSenderMetadataPrefix: true },
+      slashCommand: { command: "/openclaw", enabled: true },
+    });
+    ctx.resolveUserName = async (id: string) => ({ name: id === "U1" ? "Alice" : "Bek" }) as any;
+
+    const result = await prepareSenderPrefixMessage(ctx, "<@BOT> hello", "1700000000.0101");
+
+    if (!result) {
+      throw new Error("expected Slack sender metadata prefix message");
+    }
+    expect(result.ctxPayload.BodyForAgent).toBe(
+      'Sender (untrusted metadata): {"id":"U1","name":"Alice"}\n<@BOT> (Bek) hello',
+    );
+    expect(result.ctxPayload.RawBody).toBe("<@BOT> (Bek) hello");
+    expect(result.ctxPayload.CommandBody).toBe("hello");
+    expect(result.ctxPayload.BodyForCommands).toBe("hello");
+  });
+
+  it("does not prefix group BodyForAgent by default", async () => {
+    const ctx = createSenderPrefixCtx({
+      channels: {},
+      slashCommand: { command: "/openclaw", enabled: true },
+    });
+    ctx.resolveUserName = async (id: string) => ({ name: id === "U1" ? "Alice" : "Bek" }) as any;
+
+    const result = await prepareSenderPrefixMessage(ctx, "<@BOT> hello", "1700000000.0102");
+
+    if (!result) {
+      throw new Error("expected Slack sender metadata default message");
+    }
+    expect(result.ctxPayload.BodyForAgent).toBe("<@BOT> (Bek) hello");
+    expect(result.ctxPayload.BodyForAgent).not.toContain("Sender (untrusted metadata):");
+  });
+
+  it("lets account config opt out of root group sender metadata prefix", async () => {
+    const ctx = createSenderPrefixCtx({
+      channels: { groupSenderMetadataPrefix: true },
+      slashCommand: { command: "/openclaw", enabled: true },
+    });
+    ctx.resolveUserName = async (id: string) => ({ name: id === "U1" ? "Alice" : "Bek" }) as any;
+
+    const result = await prepareSenderPrefixMessage(ctx, "<@BOT> hello", "1700000000.0106", {
+      groupSenderMetadataPrefix: false,
+    });
+
+    if (!result) {
+      throw new Error("expected Slack account opt-out sender metadata message");
+    }
+    expect(result.ctxPayload.BodyForAgent).toBe("<@BOT> (Bek) hello");
+    expect(result.ctxPayload.BodyForAgent).not.toContain("Sender (untrusted metadata):");
+  });
+
+  it("lets account config opt into group sender metadata prefix", async () => {
+    const ctx = createSenderPrefixCtx({
+      channels: { groupSenderMetadataPrefix: false },
+      slashCommand: { command: "/openclaw", enabled: true },
+    });
+    ctx.resolveUserName = async (id: string) => ({ name: id === "U1" ? "Alice" : "Bek" }) as any;
+
+    const result = await prepareSenderPrefixMessage(ctx, "<@BOT> hello", "1700000000.0107", {
+      groupSenderMetadataPrefix: true,
+    });
+
+    if (!result) {
+      throw new Error("expected Slack account opt-in sender metadata message");
+    }
+    expect(result.ctxPayload.BodyForAgent).toBe(
+      'Sender (untrusted metadata): {"id":"U1","name":"Alice"}\n<@BOT> (Bek) hello',
+    );
+  });
+
+  it("does not duplicate bot sender name when name falls back to bot id", async () => {
+    const ctx = createSenderPrefixCtx({
+      channels: { groupSenderMetadataPrefix: true, allowBots: true },
+      allowFrom: ["UOWNER"],
+      slashCommand: { command: "/openclaw", enabled: true },
+    });
+    ctx.resolveUserName = async (id: string) =>
+      ({ name: id === "BOT" ? "OpenClaw" : undefined }) as any;
+    (ctx.app.client as any).conversations = {
+      members: vi.fn().mockResolvedValue({
+        members: ["UOWNER"],
+        response_metadata: { next_cursor: "" },
+      }),
+    };
+
+    const result = await prepareSlackMessage({
+      ctx,
+      account: { accountId: "default", config: { allowBots: true }, replyToMode: "off" } as never,
+      message: {
+        type: "message",
+        channel: "C1",
+        channel_type: "channel",
+        text: "<@BOT> deploy failed",
+        bot_id: "BDEPLOY",
+        subtype: "bot_message",
+        ts: "1700000000.0103",
+        event_ts: "1700000000.0103",
+      } as never,
+      opts: { source: "message", wasMentioned: true },
+    });
+
+    if (!result) {
+      throw new Error("expected Slack bot sender metadata prefix message");
+    }
+    expect(result.ctxPayload.BodyForAgent).toBe(
+      'Sender (untrusted metadata): {"id":"BDEPLOY"}\n<@BOT> (OpenClaw) deploy failed',
+    );
+  });
+
+  it("keeps Slack DM BodyForAgent unprefixed when group sender metadata is enabled", async () => {
+    const ctx = createSenderPrefixCtx({
+      channels: { groupSenderMetadataPrefix: true, dm: { enabled: true, policy: "open" } },
+      allowFrom: ["*"],
+      slashCommand: { command: "/openclaw", enabled: true },
+    });
+    ctx.resolveUserName = async () => ({ name: "Alice" }) as any;
+
+    const result = await prepareSlackMessage({
+      ctx,
+      account: { accountId: "default", config: {}, replyToMode: "off" } as never,
+      message: {
+        type: "message",
+        channel: "D1",
+        channel_type: "im",
+        text: "hello from dm",
+        user: "U1",
+        ts: "1700000000.0104",
+        event_ts: "1700000000.0104",
+      } as never,
+      opts: { source: "message", wasMentioned: true },
+    });
+
+    if (!result) {
+      throw new Error("expected Slack DM sender metadata no-op message");
+    }
+    expect(result.ctxPayload.BodyForAgent).toBe("hello from dm");
+    expect(result.ctxPayload.BodyForAgent).not.toContain("Sender (untrusted metadata):");
+  });
+
+  it("records skipped channel history with sender metadata when enabled", async () => {
+    const ctx = createSenderPrefixCtx({
+      channels: { groupSenderMetadataPrefix: true },
+      slashCommand: { command: "/openclaw", enabled: true },
+    });
+    ctx.historyLimit = 5;
+    ctx.resolveUserName = async () => ({ name: "Alice" }) as any;
+
+    const result = await prepareSlackMessage({
+      ctx,
+      account: { accountId: "default", config: {}, replyToMode: "off" } as never,
+      message: {
+        type: "message",
+        channel: "C1",
+        channel_type: "channel",
+        text: "background context",
+        user: "U1",
+        ts: "1700000000.0105",
+        event_ts: "1700000000.0105",
+      } as never,
+      opts: { source: "message" },
+    });
+
+    expect(result).toBeNull();
+    expect(ctx.channelHistories.get("C1")?.[0]?.body).toBe(
+      'Sender (untrusted metadata): {"id":"U1","name":"Alice"}\nbackground context',
+    );
   });
 
   it("keeps raw Slack mention tokens when user lookup cannot resolve them", async () => {
