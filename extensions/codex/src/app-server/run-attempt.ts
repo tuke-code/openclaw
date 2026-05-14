@@ -141,6 +141,12 @@ import {
   recordCodexTrajectoryContext,
 } from "./trajectory.js";
 import { mirrorCodexAppServerTranscript } from "./transcript-mirror.js";
+import {
+  hasCodexAppServerActiveTurns,
+  isOnlyCodexAppServerActiveTurn,
+  registerCodexAppServerActiveTurn,
+  type CodexAppServerActiveTurnRegistration,
+} from "./turn-attribution.js";
 import { createCodexUserInputBridge } from "./user-input-bridge.js";
 import { filterToolsForVisionInputs } from "./vision-tools.js";
 
@@ -426,6 +432,59 @@ function restrictCodexAppServerSandboxForOpenClawSandbox(
     ...appServer,
     sandbox: "workspace-write",
   };
+}
+
+type CodexAppServerStartingTurn = object;
+const startingCodexAppServerTurnsByClient = new WeakMap<
+  CodexAppServerClient,
+  Set<CodexAppServerStartingTurn>
+>();
+
+function registerStartingCodexAppServerTurn(client: CodexAppServerClient): {
+  cleanup: () => void;
+  registration: CodexAppServerStartingTurn;
+} {
+  let startingTurns = startingCodexAppServerTurnsByClient.get(client);
+  if (!startingTurns) {
+    startingTurns = new Set<CodexAppServerStartingTurn>();
+    startingCodexAppServerTurnsByClient.set(client, startingTurns);
+  }
+  const startingTurn: CodexAppServerStartingTurn = {};
+  startingTurns.add(startingTurn);
+  let cleanedUp = false;
+  return {
+    cleanup: () => {
+      if (cleanedUp) {
+        return;
+      }
+      cleanedUp = true;
+      startingTurns.delete(startingTurn);
+      if (startingTurns.size === 0) {
+        startingCodexAppServerTurnsByClient.delete(client);
+      }
+    },
+    registration: startingTurn,
+  };
+}
+
+function isOnlyActiveCodexAppServerTurn(
+  client: CodexAppServerClient,
+  activeTurn: CodexAppServerActiveTurnRegistration,
+): boolean {
+  const startingTurns = startingCodexAppServerTurnsByClient.get(client);
+  return (startingTurns?.size ?? 0) === 0 && isOnlyCodexAppServerActiveTurn(client, activeTurn);
+}
+
+function isOnlyStartingCodexAppServerTurn(
+  client: CodexAppServerClient,
+  startingTurn: CodexAppServerStartingTurn,
+): boolean {
+  const startingTurns = startingCodexAppServerTurnsByClient.get(client);
+  return (
+    !hasCodexAppServerActiveTurns(client) &&
+    startingTurns?.size === 1 &&
+    startingTurns.has(startingTurn)
+  );
 }
 
 export async function runCodexAppServerAttempt(
@@ -887,9 +946,18 @@ export async function runCodexAppServerAttempt(
 
   let projector: CodexAppServerEventProjector | undefined;
   let turnId: string | undefined;
-  const pendingNotifications: CodexServerNotification[] = [];
+  type QueuedCodexServerNotification = {
+    notification: CodexServerNotification;
+    startingTurnAtEnqueue?: CodexAppServerStartingTurn;
+    activeTurnAtEnqueue?: CodexAppServerActiveTurnRegistration;
+  };
+  const pendingNotifications: QueuedCodexServerNotification[] = [];
   let userInputBridge: ReturnType<typeof createCodexUserInputBridge> | undefined;
   let steeringQueue: ReturnType<typeof createCodexSteeringQueue> | undefined;
+  let startingTurnRegistration: CodexAppServerStartingTurn | undefined;
+  let activeTurnStartedFromRegistration: CodexAppServerStartingTurn | undefined;
+  let activeTurnRegistration: CodexAppServerActiveTurnRegistration | undefined;
+  let cleanupActiveTurnRegistration: (() => void) | undefined;
   let completed = false;
   let timedOut = false;
   let turnCompletionIdleTimedOut = false;
@@ -1220,10 +1288,26 @@ export async function runCodexAppServerAttempt(
     });
   };
 
-  const handleNotification = async (notification: CodexServerNotification) => {
+  const handleNotification = async (queued: QueuedCodexServerNotification) => {
+    const { notification } = queued;
     userInputBridge?.handleNotification(notification);
     if (!projector || !turnId) {
-      pendingNotifications.push(notification);
+      if (
+        !hasCodexNotificationTurnScope(notification.params) &&
+        isCodexTurnAbortMarkerNotification(notification, { currentPromptText: promptBuild.prompt })
+      ) {
+        if (
+          (queued.startingTurnAtEnqueue &&
+            (queued.startingTurnAtEnqueue === startingTurnRegistration ||
+              queued.startingTurnAtEnqueue === activeTurnStartedFromRegistration)) ||
+          (queued.activeTurnAtEnqueue !== undefined &&
+            queued.activeTurnAtEnqueue === activeTurnRegistration)
+        ) {
+          pendingNotifications.push(queued);
+        }
+        return;
+      }
+      pendingNotifications.push(queued);
       return;
     }
     const isCurrentTurnNotification = isTurnNotification(
@@ -1231,8 +1315,17 @@ export async function runCodexAppServerAttempt(
       thread.threadId,
       turnId,
     );
+    const isUnscopedTurnAbortMarker =
+      !isCurrentTurnNotification &&
+      !hasCodexNotificationTurnScope(notification.params) &&
+      ((queued.activeTurnAtEnqueue !== undefined &&
+        queued.activeTurnAtEnqueue === activeTurnRegistration) ||
+        (queued.startingTurnAtEnqueue !== undefined &&
+          queued.startingTurnAtEnqueue === activeTurnStartedFromRegistration)) &&
+      isCodexTurnAbortMarkerNotification(notification, { currentPromptText: promptBuild.prompt });
+    const isActiveTurnNotification = isCurrentTurnNotification || isUnscopedTurnAbortMarker;
     const isTurnCompletion = notification.method === "turn/completed" && isCurrentTurnNotification;
-    if (isCurrentTurnNotification) {
+    if (isActiveTurnNotification) {
       touchTurnCompletionActivity(`notification:${notification.method}`, {
         details: describeNotificationActivity(notification),
       });
@@ -1285,7 +1378,7 @@ export async function runCodexAppServerAttempt(
     // inside projector.handleNotification still releases the session lane.
     // See openclaw/openclaw#67996.
     const isTurnAbortMarker =
-      isCurrentTurnNotification &&
+      isActiveTurnNotification &&
       isCodexTurnAbortMarkerNotification(notification, { currentPromptText: promptBuild.prompt });
     const isTurnTerminal = isTurnCompletion || isTurnAbortMarker;
     try {
@@ -1300,6 +1393,7 @@ export async function runCodexAppServerAttempt(
         if (isTurnAbortMarker) {
           projector.markAborted();
         }
+        cleanupActiveTurnRegistration?.();
         if (!timedOut && !runAbortController.signal.aborted) {
           await steeringQueue?.flushPending();
         }
@@ -1311,12 +1405,33 @@ export async function runCodexAppServerAttempt(
       }
     }
   };
-  const enqueueNotification = (notification: CodexServerNotification): Promise<void> => {
+  const enqueueQueuedNotification = (queued: QueuedCodexServerNotification): Promise<void> => {
     notificationQueue = notificationQueue.then(
-      () => handleNotification(notification),
-      () => handleNotification(notification),
+      () => handleNotification(queued),
+      () => handleNotification(queued),
     );
     return notificationQueue;
+  };
+  const enqueueNotification = (notification: CodexServerNotification): Promise<void> => {
+    const isUnscopedTurnAbortMarker =
+      !hasCodexNotificationTurnScope(notification.params) &&
+      isCodexTurnAbortMarkerNotification(notification, { currentPromptText: promptBuild.prompt });
+    return enqueueQueuedNotification({
+      notification,
+      startingTurnAtEnqueue:
+        isUnscopedTurnAbortMarker &&
+        (!projector || !turnId) &&
+        startingTurnRegistration !== undefined &&
+        isOnlyStartingCodexAppServerTurn(client, startingTurnRegistration)
+          ? startingTurnRegistration
+          : undefined,
+      activeTurnAtEnqueue:
+        isUnscopedTurnAbortMarker && activeTurnRegistration
+          ? isOnlyActiveCodexAppServerTurn(client, activeTurnRegistration)
+            ? activeTurnRegistration
+            : undefined
+          : undefined,
+    });
   };
 
   const notificationCleanup = client.addNotificationHandler(enqueueNotification);
@@ -1478,19 +1593,33 @@ export async function runCodexAppServerAttempt(
   ];
 
   let turn: CodexTurnStartResponse | undefined;
-  const startCodexTurn = async (): Promise<CodexTurnStartResponse> =>
-    assertCodexTurnStartResponse(
-      await client.request(
-        "turn/start",
-        buildTurnStartParams(params, {
-          threadId: thread.threadId,
-          cwd: effectiveWorkspace,
-          appServer: pluginAppServer,
-          promptText: promptBuild.prompt,
-        }),
-        { timeoutMs: params.timeoutMs, signal: runAbortController.signal },
-      ),
-    );
+  let cleanupStartedTurnRegistration: (() => void) | undefined;
+  const startCodexTurn = async (): Promise<CodexTurnStartResponse> => {
+    const startingTurn = registerStartingCodexAppServerTurn(client);
+    startingTurnRegistration = startingTurn.registration;
+    try {
+      const response = assertCodexTurnStartResponse(
+        await client.request(
+          "turn/start",
+          buildTurnStartParams(params, {
+            threadId: thread.threadId,
+            cwd: effectiveWorkspace,
+            appServer: pluginAppServer,
+            promptText: promptBuild.prompt,
+          }),
+          { timeoutMs: params.timeoutMs, signal: runAbortController.signal },
+        ),
+      );
+      cleanupStartedTurnRegistration = startingTurn.cleanup;
+      return response;
+    } catch (error) {
+      startingTurn.cleanup();
+      if (startingTurnRegistration === startingTurn.registration) {
+        startingTurnRegistration = undefined;
+      }
+      throw error;
+    }
+  };
   try {
     runAgentHarnessLlmInputHook({
       event: llmInputEvent,
@@ -1534,7 +1663,7 @@ export async function runCodexAppServerAttempt(
       const usageLimitError = await formatCodexTurnStartUsageLimitError({
         client,
         error: turnStartError,
-        pendingNotifications,
+        pendingNotifications: pendingNotifications.map(({ notification }) => notification),
         timeoutMs: appServer.requestTimeoutMs,
         signal: runAbortController.signal,
       });
@@ -1609,6 +1738,22 @@ export async function runCodexAppServerAttempt(
   }
   turnId = turn.turn.id;
   const activeTurnId = turn.turn.id;
+  const activeTurnHandle = registerCodexAppServerActiveTurn(client);
+  activeTurnRegistration = activeTurnHandle.registration;
+  let activeTurnRegistrationCleanedUp = false;
+  cleanupActiveTurnRegistration = () => {
+    if (activeTurnRegistrationCleanedUp) {
+      return;
+    }
+    activeTurnRegistrationCleanedUp = true;
+    activeTurnHandle.cleanup();
+    activeTurnRegistration = undefined;
+    activeTurnStartedFromRegistration = undefined;
+  };
+  activeTurnStartedFromRegistration = startingTurnRegistration;
+  cleanupStartedTurnRegistration?.();
+  cleanupStartedTurnRegistration = undefined;
+  startingTurnRegistration = undefined;
   emitExecutionPhaseOnce("turn_accepted", { phase: "turn_accepted" });
   userInputBridge = createCodexUserInputBridge({
     paramsForRun: params,
@@ -1628,8 +1773,8 @@ export async function runCodexAppServerAttempt(
   });
   emitLifecycleStart();
   const activeProjector = projector;
-  for (const notification of pendingNotifications.splice(0)) {
-    await enqueueNotification(notification);
+  for (const queued of pendingNotifications.splice(0)) {
+    await enqueueQueuedNotification(queued);
   }
   if (!completed && isTerminalTurnStatus(turn.turn.status)) {
     await enqueueNotification({
@@ -1863,6 +2008,12 @@ export async function runCodexAppServerAttempt(
     runAbortController.signal.removeEventListener("abort", abortListener);
     params.abortSignal?.removeEventListener("abort", abortFromUpstream);
     steeringQueue?.cancel();
+    cleanupStartedTurnRegistration?.();
+    cleanupStartedTurnRegistration = undefined;
+    startingTurnRegistration = undefined;
+    activeTurnStartedFromRegistration = undefined;
+    cleanupActiveTurnRegistration?.();
+    cleanupActiveTurnRegistration = undefined;
     clearActiveEmbeddedRun(params.sessionId, handle, params.sessionKey);
   }
 }
@@ -2758,6 +2909,13 @@ function isTurnNotification(
     return false;
   }
   return readString(value, "threadId") === threadId && readNotificationTurnId(value) === turnId;
+}
+
+function hasCodexNotificationTurnScope(value: JsonValue | undefined): boolean {
+  if (!isJsonObject(value)) {
+    return false;
+  }
+  return readString(value, "threadId") !== undefined || readNotificationTurnId(value) !== undefined;
 }
 
 function isRetryableErrorNotification(value: JsonValue | undefined): boolean {

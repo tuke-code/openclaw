@@ -48,6 +48,7 @@ import {
   buildTurnStartParams,
   startOrResumeThread,
 } from "./thread-lifecycle.js";
+import { registerCodexAppServerActiveTurn } from "./turn-attribution.js";
 
 let tempDir: string;
 
@@ -190,6 +191,16 @@ function mockCall(mock: unknown, label: string, index = 0): unknown[] {
     throw new Error(`Expected ${label} call ${index + 1}`);
   }
   return call;
+}
+
+function createDeferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
 }
 
 function createAppServerHarness(
@@ -3881,6 +3892,551 @@ describe("runCodexAppServerAttempt", () => {
     expect(result.timedOut).toBe(false);
     expect(result.promptError).toBeNull();
     expect(harness.request.mock.calls.some(([method]) => method === "turn/interrupt")).toBe(false);
+  });
+
+  it("releases completion when Codex raw-events an unscoped interrupted turn marker", async () => {
+    const harness = createStartedThreadHarness();
+    const run = runCodexAppServerAttempt(
+      createParams(path.join(tempDir, "session.jsonl"), path.join(tempDir, "workspace")),
+      { turnTerminalIdleTimeoutMs: 60_000 },
+    );
+    let resolved = false;
+    void run.then(() => {
+      resolved = true;
+    });
+
+    await harness.waitForMethod("turn/start");
+    await harness.notify({
+      method: "rawResponseItem/completed",
+      params: {
+        item: {
+          id: "abort-marker-1",
+          type: "message",
+          role: "user",
+          content: [
+            {
+              type: "input_text",
+              text: "<turn_aborted>\nThe user interrupted the previous turn on purpose. Any running unified exec processes may still be running in the background. If any tools/commands were aborted, they may have partially executed.\n</turn_aborted>",
+            },
+          ],
+        },
+      },
+    });
+
+    const result = await run;
+    expect(resolved).toBe(true);
+    expect(result.aborted).toBe(true);
+    expect(result.timedOut).toBe(false);
+    expect(result.promptError).toBeNull();
+    expect(harness.request.mock.calls.some(([method]) => method === "turn/interrupt")).toBe(false);
+  });
+
+  it("replays an unscoped interrupted marker emitted during turn start", async () => {
+    const handlers = new Set<(notification: CodexServerNotification) => Promise<void> | void>();
+    const notifyAll = async (notification: CodexServerNotification) => {
+      await Promise.all([...handlers].map(async (handler) => await handler(notification)));
+    };
+    const request = vi.fn(async (method: string) => {
+      if (method === "thread/start") {
+        return threadStartResult("thread-1");
+      }
+      if (method === "turn/start") {
+        queueMicrotask(() => {
+          queueMicrotask(() => {
+            void notifyAll({
+              method: "rawResponseItem/completed",
+              params: {
+                item: {
+                  id: "abort-marker-1",
+                  type: "message",
+                  role: "user",
+                  content: [
+                    {
+                      type: "input_text",
+                      text: "<turn_aborted>\nThe user interrupted the previous turn on purpose. Any running unified exec processes may still be running in the background. If any tools/commands were aborted, they may have partially executed.\n</turn_aborted>",
+                    },
+                  ],
+                },
+              },
+            });
+          });
+        });
+        return turnStartResult("turn-1");
+      }
+      return {};
+    });
+    __testing.setCodexAppServerClientFactoryForTests(
+      async () =>
+        ({
+          request,
+          addNotificationHandler: (handler: (notification: CodexServerNotification) => void) => {
+            handlers.add(handler);
+            return () => {
+              handlers.delete(handler);
+            };
+          },
+          addRequestHandler: () => () => undefined,
+        }) as never,
+    );
+    const result = await runCodexAppServerAttempt(
+      createParams(path.join(tempDir, "session.jsonl"), path.join(tempDir, "workspace")),
+      { turnTerminalIdleTimeoutMs: 60_000 },
+    );
+
+    expect(result.aborted).toBe(true);
+    expect(result.timedOut).toBe(false);
+    expect(result.promptError).toBeNull();
+  });
+
+  it("does not attribute an unscoped interrupted marker when an active turn overlaps a starting turn", async () => {
+    const handlers = new Set<(notification: CodexServerNotification) => Promise<void> | void>();
+    const notifyAll = async (notification: CodexServerNotification) => {
+      await Promise.all([...handlers].map(async (handler) => await handler(notification)));
+    };
+    let threadIndex = 0;
+    let turnIndex = 0;
+    const secondTurnStart = createDeferred<unknown>();
+    const request = vi.fn(async (method: string) => {
+      if (method === "thread/start") {
+        threadIndex += 1;
+        return threadStartResult(`thread-${threadIndex}`);
+      }
+      if (method === "turn/start") {
+        turnIndex += 1;
+        const turnId = `turn-${turnIndex}`;
+        if (turnIndex === 2) {
+          queueMicrotask(() => {
+            queueMicrotask(() => {
+              void notifyAll({
+                method: "rawResponseItem/completed",
+                params: {
+                  item: {
+                    id: "abort-marker-1",
+                    type: "message",
+                    role: "user",
+                    content: [
+                      {
+                        type: "input_text",
+                        text: "<turn_aborted>\nThe user interrupted the previous turn on purpose. Any running unified exec processes may still be running in the background. If any tools/commands were aborted, they may have partially executed.\n</turn_aborted>",
+                      },
+                    ],
+                  },
+                },
+              });
+            });
+          });
+        }
+        return turnIndex === 2 ? await secondTurnStart.promise : turnStartResult(turnId);
+      }
+      return {};
+    });
+    const sharedClient = {
+      request,
+      addNotificationHandler: (handler: (notification: CodexServerNotification) => void) => {
+        handlers.add(handler);
+        return () => {
+          handlers.delete(handler);
+        };
+      },
+      addRequestHandler: () => () => undefined,
+    } as never;
+    __testing.setCodexAppServerClientFactoryForTests(async () => sharedClient);
+
+    const runA = runCodexAppServerAttempt(
+      createParams(path.join(tempDir, "session-a.jsonl"), path.join(tempDir, "workspace-a")),
+      { turnTerminalIdleTimeoutMs: 60_000 },
+    );
+    let resolvedA = false;
+    void runA.then(() => {
+      resolvedA = true;
+    });
+    await vi.waitFor(
+      () =>
+        expect(request.mock.calls.filter(([method]) => method === "turn/start")).toHaveLength(1),
+      { interval: 1 },
+    );
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    const runB = runCodexAppServerAttempt(
+      createParams(path.join(tempDir, "session-b.jsonl"), path.join(tempDir, "workspace-b")),
+      { turnTerminalIdleTimeoutMs: 60_000 },
+    );
+    let resolvedB = false;
+    void runB.then(() => {
+      resolvedB = true;
+    });
+    await vi.waitFor(
+      () =>
+        expect(request.mock.calls.filter(([method]) => method === "turn/start")).toHaveLength(2),
+      { interval: 1 },
+    );
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(resolvedB).toBe(false);
+    expect(resolvedA).toBe(false);
+
+    secondTurnStart.resolve(turnStartResult("turn-2"));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(resolvedB).toBe(false);
+
+    await notifyAll({
+      method: "turn/completed",
+      params: {
+        threadId: "thread-2",
+        turnId: "turn-2",
+        turn: { id: "turn-2", status: "completed" },
+      },
+    });
+    const resultB = await runB;
+    expect(resultB.aborted).toBe(false);
+
+    await notifyAll({
+      method: "turn/completed",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        turn: { id: "turn-1", status: "completed" },
+      },
+    });
+    const resultA = await runA;
+    expect(resultA.aborted).toBe(false);
+  });
+
+  it("does not release concurrent shared-client turns on an unscoped interrupted marker", async () => {
+    const handlers = new Set<(notification: CodexServerNotification) => Promise<void> | void>();
+    let threadIndex = 0;
+    let turnIndex = 0;
+    const request = vi.fn(async (method: string) => {
+      if (method === "thread/start") {
+        threadIndex += 1;
+        return threadStartResult(`thread-${threadIndex}`);
+      }
+      if (method === "turn/start") {
+        turnIndex += 1;
+        return turnStartResult("turn-1");
+      }
+      return {};
+    });
+    const sharedClient = {
+      request,
+      addNotificationHandler: (handler: (notification: CodexServerNotification) => void) => {
+        handlers.add(handler);
+        return () => {
+          handlers.delete(handler);
+        };
+      },
+      addRequestHandler: () => () => undefined,
+    } as never;
+    __testing.setCodexAppServerClientFactoryForTests(async () => sharedClient);
+    const notifyAll = async (notification: CodexServerNotification) => {
+      await Promise.all([...handlers].map(async (handler) => await handler(notification)));
+    };
+
+    const runA = runCodexAppServerAttempt(
+      createParams(path.join(tempDir, "session-a.jsonl"), path.join(tempDir, "workspace-a")),
+      { turnTerminalIdleTimeoutMs: 60_000 },
+    );
+    const runB = runCodexAppServerAttempt(
+      createParams(path.join(tempDir, "session-b.jsonl"), path.join(tempDir, "workspace-b")),
+      { turnTerminalIdleTimeoutMs: 60_000 },
+    );
+    let resolvedA = false;
+    let resolvedB = false;
+    void runA.then(() => {
+      resolvedA = true;
+    });
+    void runB.then(() => {
+      resolvedB = true;
+    });
+
+    await vi.waitFor(
+      () =>
+        expect(request.mock.calls.filter(([method]) => method === "turn/start")).toHaveLength(2),
+      { interval: 1 },
+    );
+    await notifyAll({
+      method: "rawResponseItem/completed",
+      params: {
+        item: {
+          id: "abort-marker-1",
+          type: "message",
+          role: "user",
+          content: [
+            {
+              type: "input_text",
+              text: "<turn_aborted>\nThe user interrupted the previous turn on purpose. Any running unified exec processes may still be running in the background. If any tools/commands were aborted, they may have partially executed.\n</turn_aborted>",
+            },
+          ],
+        },
+      },
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(resolvedA).toBe(false);
+    expect(resolvedB).toBe(false);
+
+    await notifyAll({
+      method: "turn/completed",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        turn: { id: "turn-1", status: "completed" },
+      },
+    });
+    await notifyAll({
+      method: "turn/completed",
+      params: {
+        threadId: "thread-2",
+        turnId: "turn-1",
+        turn: { id: "turn-1", status: "completed" },
+      },
+    });
+
+    const [resultA, resultB] = await Promise.all([runA, runB]);
+    expect(resultA.aborted).toBe(false);
+    expect(resultB.aborted).toBe(false);
+  });
+
+  it("does not treat a harness turn as only active while a bound Codex turn is registered", async () => {
+    const handlers = new Set<(notification: CodexServerNotification) => Promise<void> | void>();
+    const request = vi.fn(async (method: string) => {
+      if (method === "thread/start") {
+        return threadStartResult("thread-1");
+      }
+      if (method === "turn/start") {
+        return turnStartResult("turn-1");
+      }
+      return {};
+    });
+    const sharedClient = {
+      request,
+      addNotificationHandler: (handler: (notification: CodexServerNotification) => void) => {
+        handlers.add(handler);
+        return () => {
+          handlers.delete(handler);
+        };
+      },
+      addRequestHandler: () => () => undefined,
+    } as never;
+    const boundTurn = registerCodexAppServerActiveTurn(sharedClient);
+    __testing.setCodexAppServerClientFactoryForTests(async () => sharedClient);
+    const notifyAll = async (notification: CodexServerNotification) => {
+      await Promise.all([...handlers].map(async (handler) => await handler(notification)));
+    };
+    try {
+      const run = runCodexAppServerAttempt(
+        createParams(path.join(tempDir, "session.jsonl"), path.join(tempDir, "workspace")),
+        { turnTerminalIdleTimeoutMs: 60_000 },
+      );
+      let resolved = false;
+      void run.then(() => {
+        resolved = true;
+      });
+
+      await vi.waitFor(
+        () =>
+          expect(request.mock.calls.filter(([method]) => method === "turn/start")).toHaveLength(1),
+        { interval: 1 },
+      );
+      await notifyAll({
+        method: "rawResponseItem/completed",
+        params: {
+          item: {
+            id: "abort-marker-1",
+            type: "message",
+            role: "user",
+            content: [
+              {
+                type: "input_text",
+                text: "<turn_aborted>\nThe user interrupted the previous turn on purpose. Any running unified exec processes may still be running in the background. If any tools/commands were aborted, they may have partially executed.\n</turn_aborted>",
+              },
+            ],
+          },
+        },
+      });
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(resolved).toBe(false);
+
+      await notifyAll({
+        method: "turn/completed",
+        params: {
+          threadId: "thread-1",
+          turnId: "turn-1",
+          turn: { id: "turn-1", status: "completed" },
+        },
+      });
+      const result = await run;
+      expect(result.aborted).toBe(false);
+    } finally {
+      boundTurn.cleanup();
+    }
+  });
+
+  it("replays an unscoped interrupted marker received while the only turn start is pending", async () => {
+    const handlers = new Set<(notification: CodexServerNotification) => Promise<void> | void>();
+    const notifyAll = async (notification: CodexServerNotification) => {
+      await Promise.all([...handlers].map(async (handler) => await handler(notification)));
+    };
+    const turnStart = createDeferred<unknown>();
+    const request = vi.fn(async (method: string) => {
+      if (method === "thread/start") {
+        return threadStartResult("thread-1");
+      }
+      if (method === "turn/start") {
+        queueMicrotask(() => {
+          void notifyAll({
+            method: "rawResponseItem/completed",
+            params: {
+              item: {
+                id: "abort-marker-1",
+                type: "message",
+                role: "user",
+                content: [
+                  {
+                    type: "input_text",
+                    text: "<turn_aborted>\nThe user interrupted the previous turn on purpose. Any running unified exec processes may still be running in the background. If any tools/commands were aborted, they may have partially executed.\n</turn_aborted>",
+                  },
+                ],
+              },
+            },
+          });
+        });
+        return await turnStart.promise;
+      }
+      return {};
+    });
+    const sharedClient = {
+      request,
+      addNotificationHandler: (handler: (notification: CodexServerNotification) => void) => {
+        handlers.add(handler);
+        return () => {
+          handlers.delete(handler);
+        };
+      },
+      addRequestHandler: () => () => undefined,
+    } as never;
+    __testing.setCodexAppServerClientFactoryForTests(async () => sharedClient);
+
+    const run = runCodexAppServerAttempt(
+      createParams(path.join(tempDir, "session.jsonl"), path.join(tempDir, "workspace")),
+      { turnTerminalIdleTimeoutMs: 60_000 },
+    );
+    let resolved = false;
+    void run.then(() => {
+      resolved = true;
+    });
+
+    await vi.waitFor(
+      () =>
+        expect(request.mock.calls.filter(([method]) => method === "turn/start")).toHaveLength(1),
+      { interval: 1 },
+    );
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(resolved).toBe(false);
+
+    turnStart.resolve(turnStartResult("turn-1"));
+    const result = await run;
+    expect(result.aborted).toBe(true);
+  });
+
+  it("does not replay stale unscoped interrupted markers queued before turn start", async () => {
+    const handlers = new Set<(notification: CodexServerNotification) => Promise<void> | void>();
+    let threadIndex = 0;
+    let turnIndex = 0;
+    const secondThreadStart = createDeferred<unknown>();
+    const request = vi.fn(async (method: string) => {
+      if (method === "thread/start") {
+        threadIndex += 1;
+        if (threadIndex === 2) {
+          return await secondThreadStart.promise;
+        }
+        return threadStartResult(`thread-${threadIndex}`);
+      }
+      if (method === "turn/start") {
+        turnIndex += 1;
+        return turnStartResult(`turn-${turnIndex}`);
+      }
+      return {};
+    });
+    const sharedClient = {
+      request,
+      addNotificationHandler: (handler: (notification: CodexServerNotification) => void) => {
+        handlers.add(handler);
+        return () => {
+          handlers.delete(handler);
+        };
+      },
+      addRequestHandler: () => () => undefined,
+    } as never;
+    __testing.setCodexAppServerClientFactoryForTests(async () => sharedClient);
+    const notifyAll = async (notification: CodexServerNotification) => {
+      await Promise.all([...handlers].map(async (handler) => await handler(notification)));
+    };
+
+    const runA = runCodexAppServerAttempt(
+      createParams(path.join(tempDir, "session-a.jsonl"), path.join(tempDir, "workspace-a")),
+      { turnTerminalIdleTimeoutMs: 60_000 },
+    );
+
+    await vi.waitFor(
+      () =>
+        expect(request.mock.calls.filter(([method]) => method === "turn/start")).toHaveLength(1),
+      { interval: 1 },
+    );
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    const runB = runCodexAppServerAttempt(
+      createParams(path.join(tempDir, "session-b.jsonl"), path.join(tempDir, "workspace-b")),
+      { turnTerminalIdleTimeoutMs: 60_000 },
+    );
+    let resolvedB = false;
+    void runB.then(() => {
+      resolvedB = true;
+    });
+
+    await vi.waitFor(
+      () =>
+        expect(request.mock.calls.filter(([method]) => method === "thread/start")).toHaveLength(2),
+      { interval: 1 },
+    );
+    await notifyAll({
+      method: "rawResponseItem/completed",
+      params: {
+        item: {
+          id: "abort-marker-1",
+          type: "message",
+          role: "user",
+          content: [
+            {
+              type: "input_text",
+              text: "<turn_aborted>\nThe user interrupted the previous turn on purpose. Any running unified exec processes may still be running in the background. If any tools/commands were aborted, they may have partially executed.\n</turn_aborted>",
+            },
+          ],
+        },
+      },
+    });
+
+    const resultA = await runA;
+    expect(resultA.aborted).toBe(true);
+    expect(resolvedB).toBe(false);
+
+    secondThreadStart.resolve(threadStartResult("thread-2"));
+    await vi.waitFor(
+      () =>
+        expect(request.mock.calls.filter(([method]) => method === "turn/start")).toHaveLength(2),
+      { interval: 1 },
+    );
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(resolvedB).toBe(false);
+    await notifyAll({
+      method: "turn/completed",
+      params: {
+        threadId: "thread-2",
+        turnId: "turn-2",
+        turn: { id: "turn-2", status: "completed" },
+      },
+    });
+
+    const resultB = await runB;
+    expect(resultB.aborted).toBe(false);
   });
 
   it("does not treat a user prompt containing the interrupted marker as terminal", async () => {

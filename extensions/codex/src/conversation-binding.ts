@@ -29,6 +29,7 @@ import {
   type CodexAppServerAuthProfileLookup,
 } from "./app-server/session-binding.js";
 import { getSharedCodexAppServerClient } from "./app-server/shared-client.js";
+import { registerCodexAppServerActiveTurn } from "./app-server/turn-attribution.js";
 import { formatCodexDisplayText } from "./command-formatters.js";
 import {
   createCodexConversationBindingData,
@@ -377,6 +378,8 @@ async function runBoundTurn(params: {
       return undefined;
     },
   );
+  const activeTurnHandle = registerCodexAppServerActiveTurn(client);
+  let cleanupConversationActiveTurn: (() => void) | undefined;
   try {
     const response: CodexTurnStartResponse = await client.request(
       "turn/start",
@@ -401,17 +404,15 @@ async function runBoundTurn(params: {
       { timeoutMs: runtime.requestTimeoutMs },
     );
     const turnId = response.turn.id;
-    const activeCleanup = trackCodexConversationActiveTurn({
+    cleanupConversationActiveTurn = trackCodexConversationActiveTurn({
       sessionFile: params.data.sessionFile,
       threadId,
       turnId,
     });
     collector.setTurnId(turnId);
-    const completion = await collector
-      .wait({
-        timeoutMs: params.timeoutMs ?? DEFAULT_BOUND_TURN_TIMEOUT_MS,
-      })
-      .finally(activeCleanup);
+    const completion = await collector.wait({
+      timeoutMs: params.timeoutMs ?? DEFAULT_BOUND_TURN_TIMEOUT_MS,
+    });
     const replyText = completion.replyText.trim();
     return {
       reply: {
@@ -419,6 +420,8 @@ async function runBoundTurn(params: {
       },
     };
   } finally {
+    cleanupConversationActiveTurn?.();
+    activeTurnHandle.cleanup();
     notificationCleanup();
     requestCleanup();
   }
