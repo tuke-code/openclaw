@@ -467,6 +467,7 @@ const allowedExactPaths = new Set([
   "extensions/codex/src/node-cli-sessions.ts",
   "src/agents/session-tool-result-guard.ts",
   "src/infra/restart-sentinel.ts",
+  "src/plugin-sdk/session-store-runtime.ts",
 ]);
 
 const allowedPrefixes = ["src/commands/doctor", "src/commands/export-trajectory"];

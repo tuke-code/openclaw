@@ -253,7 +253,11 @@ function selectSessionEntryRows(
 ) {
   return db
     .selectFrom("session_routes as sr")
-    .innerJoin("session_entries as se", "se.session_id", "sr.session_id")
+    .innerJoin("session_entries as se", (join) =>
+      join
+        .onRef("se.session_id", "=", "sr.session_id")
+        .onRef("se.session_key", "=", "sr.session_key"),
+    )
     .innerJoin("sessions as s", "s.session_id", "se.session_id")
     .leftJoin("conversations as c", "c.conversation_id", "s.primary_conversation_id")
     .select([
@@ -649,6 +653,10 @@ function countSessionEntryRows(database: OpenClawAgentDatabase): number {
   return typeof count === "bigint" ? Number(count) : count;
 }
 
+function parseSqliteCount(value: number | bigint | undefined): number {
+  return typeof value === "bigint" ? Number(value) : (value ?? 0);
+}
+
 function readProjectedSqliteSessionEntry(
   database: OpenClawAgentDatabase,
   sessionKey: string,
@@ -883,11 +891,39 @@ export function deleteSqliteSessionEntry(
     if (!row) {
       return false;
     }
-    const result = executeSqliteQuerySync(
+    executeSqliteQuerySync(
+      database.db,
+      db.deleteFrom("session_entries").where("session_key", "=", options.sessionKey),
+    );
+    executeSqliteQuerySync(
+      database.db,
+      db.deleteFrom("session_routes").where("session_key", "=", options.sessionKey),
+    );
+    const remainingRoutes = executeSqliteQueryTakeFirstSync(
+      database.db,
+      db
+        .selectFrom("session_routes")
+        .select((eb) => eb.fn.countAll<number | bigint>().as("count"))
+        .where("session_id", "=", row.session_id),
+    );
+    const remainingEntries = executeSqliteQueryTakeFirstSync(
+      database.db,
+      db
+        .selectFrom("session_entries")
+        .select((eb) => eb.fn.countAll<number | bigint>().as("count"))
+        .where("session_id", "=", row.session_id),
+    );
+    if (
+      parseSqliteCount(remainingRoutes?.count) > 0 ||
+      parseSqliteCount(remainingEntries?.count) > 0
+    ) {
+      return true;
+    }
+    executeSqliteQuerySync(
       database.db,
       db.deleteFrom("sessions").where("session_id", "=", row.session_id),
     );
-    return Number(result.numAffectedRows ?? 0) > 0;
+    return true;
   }, options);
 }
 

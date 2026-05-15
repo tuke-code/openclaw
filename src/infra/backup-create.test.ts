@@ -246,6 +246,47 @@ describe("createBackupArchive", () => {
     );
   });
 
+  it("omits volatile live state files from the staged archive", async () => {
+    await withOpenClawTestState(
+      {
+        layout: "state-only",
+        prefix: "openclaw-backup-volatile-",
+        scenario: "minimal",
+      },
+      async (state) => {
+        const outputDir = state.path("backups");
+        await fs.mkdir(path.join(state.stateDir, "logs", "nested"), { recursive: true });
+        await fs.mkdir(path.join(state.stateDir, "delivery-queue"), { recursive: true });
+        await fs.mkdir(path.join(state.stateDir, "sessions", "s-abc"), { recursive: true });
+        await fs.writeFile(path.join(state.stateDir, "logs", "nested", "gateway.log"), "tail\n");
+        await fs.writeFile(path.join(state.stateDir, "gateway.pid"), "123\n");
+        await fs.writeFile(path.join(state.stateDir, "ipc.sock"), "");
+        await fs.writeFile(path.join(state.stateDir, "delivery-queue", "pending.json"), "{}\n");
+        await fs.writeFile(path.join(state.stateDir, "sessions", "s-abc", "meta.json"), "{}\n");
+        await fs.mkdir(outputDir, { recursive: true });
+
+        const result = await createBackupArchive({
+          output: outputDir,
+          includeWorkspace: false,
+          nowMs: Date.UTC(2026, 4, 10, 12, 0, 0),
+        });
+        const entries = await listArchiveEntries(result.archivePath);
+
+        expect(entries.some((entry) => entry.endsWith("/state/logs/nested/gateway.log"))).toBe(
+          false,
+        );
+        expect(entries.some((entry) => entry.endsWith("/state/gateway.pid"))).toBe(false);
+        expect(entries.some((entry) => entry.endsWith("/state/ipc.sock"))).toBe(false);
+        expect(entries.some((entry) => entry.endsWith("/state/delivery-queue/pending.json"))).toBe(
+          false,
+        );
+        expect(entries.some((entry) => entry.endsWith("/state/sessions/s-abc/meta.json"))).toBe(
+          true,
+        );
+      },
+    );
+  });
+
   it("does not duplicate the root manifest when the system tempdir lives inside the state dir", async () => {
     await withOpenClawTestState(
       {

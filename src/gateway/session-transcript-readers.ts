@@ -1,7 +1,9 @@
 import { deriveSessionTotalTokens, hasNonzeroUsage, normalizeUsage } from "../agents/usage.js";
 import {
+  countSqliteSessionTranscriptDisplayMessages,
   hasSqliteSessionTranscriptEvents,
   loadSqliteSessionTranscriptEvents,
+  loadSqliteSessionTranscriptTailEvents,
   resolveSqliteSessionTranscriptScope,
 } from "../config/sessions/transcript-store.sqlite.js";
 import { jsonUtf8Bytes } from "../infra/json-utf8-bytes.js";
@@ -74,6 +76,33 @@ function loadScopedTranscriptEvents(params: {
   }
 }
 
+function loadScopedTranscriptTailEvents(params: {
+  agentId?: string;
+  maxBytes?: number;
+  maxEvents: number;
+  sessionId: string;
+}): unknown[] | undefined {
+  if (!params.sessionId.trim()) {
+    return undefined;
+  }
+  try {
+    const scope = resolveSqliteSessionTranscriptScope({
+      agentId: params.agentId,
+      sessionId: params.sessionId,
+    });
+    if (!scope || !hasSqliteSessionTranscriptEvents(scope)) {
+      return undefined;
+    }
+    return loadSqliteSessionTranscriptTailEvents({
+      ...scope,
+      maxEvents: params.maxEvents,
+      ...(params.maxBytes !== undefined ? { maxBytes: params.maxBytes } : {}),
+    }).map((entry) => entry.event);
+  } catch {
+    return undefined;
+  }
+}
+
 function sqliteTranscriptEventToRecord(event: unknown): TailTranscriptRecord | null {
   if (!event || typeof event !== "object" || Array.isArray(event)) {
     return null;
@@ -95,6 +124,18 @@ function loadScopedTranscriptRecords(params: {
   sessionId: string;
 }): TailTranscriptRecord[] | undefined {
   return loadScopedTranscriptEvents(params)?.flatMap((event) => {
+    const record = sqliteTranscriptEventToRecord(event);
+    return record && record.record.type !== "session" ? [record] : [];
+  });
+}
+
+function loadScopedTranscriptTailRecords(params: {
+  agentId?: string;
+  maxBytes?: number;
+  maxEvents: number;
+  sessionId: string;
+}): TailTranscriptRecord[] | undefined {
+  return loadScopedTranscriptTailEvents(params)?.flatMap((event) => {
     const record = sqliteTranscriptEventToRecord(event);
     return record && record.record.type !== "session" ? [record] : [];
   });
@@ -205,6 +246,49 @@ function loadScopedSessionMessages(params: {
   return records ? transcriptRecordsToMessages(selectActiveTranscriptRecords(records)) : undefined;
 }
 
+function loadScopedRecentSessionMessages(params: {
+  agentId?: string;
+  maxBytes?: number;
+  maxMessages: number;
+  maxLines?: number;
+  sessionId: string;
+}): unknown[] | undefined {
+  const maxEvents = Math.max(
+    params.maxMessages,
+    Math.floor(params.maxLines ?? params.maxMessages * 20 + 20),
+  );
+  const records = loadScopedTranscriptTailRecords({
+    agentId: params.agentId,
+    maxEvents,
+    sessionId: params.sessionId,
+    ...(params.maxBytes !== undefined ? { maxBytes: params.maxBytes } : {}),
+  });
+  return records
+    ? transcriptRecordsToMessages(selectActiveTranscriptRecords(records)).slice(-params.maxMessages)
+    : undefined;
+}
+
+function countScopedSessionMessages(params: {
+  agentId?: string;
+  sessionId: string;
+}): number | undefined {
+  if (!params.sessionId.trim()) {
+    return undefined;
+  }
+  try {
+    const scope = resolveSqliteSessionTranscriptScope({
+      agentId: params.agentId,
+      sessionId: params.sessionId,
+    });
+    if (!scope || !hasSqliteSessionTranscriptEvents(scope)) {
+      return undefined;
+    }
+    return countSqliteSessionTranscriptDisplayMessages(scope);
+  } catch {
+    return undefined;
+  }
+}
+
 export function attachOpenClawTranscriptMeta(
   message: unknown,
   meta: Record<string, unknown>,
@@ -239,10 +323,13 @@ export function readRecentSessionMessages(
     return [];
   }
   return (
-    loadScopedSessionMessages({
+    loadScopedRecentSessionMessages({
       agentId: scope.agentId,
       sessionId: scope.sessionId,
-    })?.slice(-maxMessages) ?? []
+      maxMessages,
+      ...(opts?.maxBytes !== undefined ? { maxBytes: opts.maxBytes } : {}),
+      ...(opts?.maxLines !== undefined ? { maxLines: opts.maxLines } : {}),
+    }) ?? []
   );
 }
 
@@ -258,17 +345,18 @@ export function visitSessionMessages(
 }
 
 export function readSessionMessageCount(scope: SessionTranscriptReadScope): number {
-  return loadScopedSessionMessages(scope)?.length ?? 0;
+  return countScopedSessionMessages(scope) ?? 0;
 }
 
 export async function readSessionMessagesAsync(
   scope: SessionTranscriptReadScope,
   opts: ReadSessionMessagesAsyncOptions,
 ): Promise<unknown[]> {
+  if (opts.mode === "recent") {
+    return readRecentSessionMessages(scope, opts);
+  }
   const messages = loadScopedSessionMessages(scope) ?? [];
-  return opts.mode === "recent"
-    ? messages.slice(-Math.max(0, Math.floor(opts.maxMessages)))
-    : messages;
+  return messages;
 }
 
 export async function visitSessionMessagesAsync(

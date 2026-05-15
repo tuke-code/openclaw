@@ -16,9 +16,11 @@ import { closeOpenClawStateDatabaseForTest } from "../../state/openclaw-state-db
 import {
   appendSqliteSessionTranscriptEvent,
   appendSqliteSessionTranscriptMessage,
+  countSqliteSessionTranscriptDisplayMessages,
   deleteSqliteSessionTranscript,
   listSqliteSessionTranscripts,
   loadSqliteSessionTranscriptEvents,
+  loadSqliteSessionTranscriptTailEvents,
   recordSqliteSessionTranscriptSnapshot,
   replaceSqliteSessionTranscriptEvents,
 } from "./transcript-store.sqlite.js";
@@ -250,6 +252,42 @@ describe("SQLite session transcript store", () => {
         sessionId: "shared-session",
       }).map((entry) => entry.event),
     ).toEqual([{ type: "message", id: "main" }]);
+  });
+
+  it("reads bounded transcript tails without materializing older rows", () => {
+    const stateDir = createTempDir();
+    const env = { OPENCLAW_STATE_DIR: stateDir };
+    replaceSqliteSessionTranscriptEvents({
+      env,
+      agentId: "main",
+      sessionId: "session-1",
+      events: [
+        { type: "session", id: "session-1" },
+        ...Array.from({ length: 8 }, (_, index) => ({
+          type: "message",
+          id: `m${index}`,
+          parentId: index === 0 ? null : `m${index - 1}`,
+          message: { role: "user", content: `message ${index}` },
+        })),
+      ],
+      now: () => 100,
+    });
+
+    expect(
+      loadSqliteSessionTranscriptTailEvents({
+        env,
+        agentId: "main",
+        sessionId: "session-1",
+        maxEvents: 3,
+      }).map((entry) => (entry.event as { id?: string }).id),
+    ).toEqual(["m5", "m6", "m7"]);
+    expect(
+      countSqliteSessionTranscriptDisplayMessages({
+        env,
+        agentId: "main",
+        sessionId: "session-1",
+      }),
+    ).toBe(8);
   });
 
   it("lists SQLite transcript scopes", () => {

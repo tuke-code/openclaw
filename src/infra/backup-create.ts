@@ -11,9 +11,13 @@ import {
   resolveBackupPlanFromDisk,
 } from "../commands/backup-shared.js";
 import { isPathWithin } from "../commands/cleanup-utils.js";
-import { recordOpenClawStateBackupRun } from "../state/openclaw-state-db.js";
+import {
+  OPENCLAW_SQLITE_BUSY_TIMEOUT_MS,
+  recordOpenClawStateBackupRun,
+} from "../state/openclaw-state-db.js";
 import { resolveHomeDir, resolveUserPath } from "../utils.js";
 import { resolveRuntimeServiceVersion } from "../version.js";
+import { isVolatileBackupPath } from "./backup-volatile-filter.js";
 import { writeJson } from "./json-files.js";
 import { requireNodeSqlite } from "./node-sqlite.js";
 import { assertSqliteIntegrityOk } from "./sqlite-integrity.js";
@@ -35,6 +39,7 @@ export type BackupCreateOptions = {
   verify?: boolean;
   json?: boolean;
   nowMs?: number;
+  log?: (message: string) => void;
 };
 
 type BackupManifestAsset = {
@@ -148,6 +153,71 @@ async function assertOutputPathReady(outputPath: string): Promise<void> {
 function buildTempArchivePath(outputPath: string): string {
   return `${outputPath}.${randomUUID()}.tmp`;
 }
+
+const BACKUP_TAR_MAX_ATTEMPTS = 3;
+const BACKUP_TAR_BACKOFF_MS = [250, 1000] as const;
+
+function isTarEofRaceError(err: unknown): boolean {
+  const code = (err as NodeJS.ErrnoException | undefined)?.code;
+  if (code === "ENOENT" || code === "EOF" || code === "TAR_BAD_ARCHIVE") {
+    return true;
+  }
+  const message = (err as Error | undefined)?.message ?? "";
+  return /(did not encounter expected|encountered unexpected) EOF|TAR_BAD_ARCHIVE/i.test(message);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export type BackupTarRetryLogger = (message: string) => void;
+
+async function writeTarArchiveWithRetry(params: {
+  tempArchivePath: string;
+  runTar: () => Promise<void>;
+  log?: BackupTarRetryLogger;
+  sleepMs?: (ms: number) => Promise<void>;
+}): Promise<void> {
+  const sleepFn = params.sleepMs ?? sleep;
+  let lastErr: unknown;
+  for (let attempt = 1; attempt <= BACKUP_TAR_MAX_ATTEMPTS; attempt += 1) {
+    try {
+      await params.runTar();
+      return;
+    } catch (err) {
+      lastErr = err;
+      if (!isTarEofRaceError(err) || attempt === BACKUP_TAR_MAX_ATTEMPTS) {
+        break;
+      }
+      try {
+        await fs.rm(params.tempArchivePath, { force: true });
+      } catch (cleanupErr) {
+        const code = (cleanupErr as NodeJS.ErrnoException).code;
+        if (code && code !== "ENOENT") {
+          params.log?.(
+            `Backup archiver could not remove temp archive ${params.tempArchivePath} between retries: ${code}. Continuing.`,
+          );
+        }
+      }
+      const backoff = BACKUP_TAR_BACKOFF_MS[attempt - 1] ?? 0;
+      const offendingPath = (err as NodeJS.ErrnoException).path;
+      params.log?.(
+        `Backup archiver hit a live-write race${
+          offendingPath ? ` on ${offendingPath}` : ""
+        } (attempt ${attempt}/${BACKUP_TAR_MAX_ATTEMPTS}); retrying in ${Math.round(backoff / 1000)}s.`,
+      );
+      await sleepFn(backoff);
+    }
+  }
+  const final = lastErr instanceof Error ? lastErr : new Error(String(lastErr));
+  const offendingPath = (lastErr as NodeJS.ErrnoException | undefined)?.path;
+  const suffix = offendingPath
+    ? ` (last offending path: ${offendingPath}, after ${BACKUP_TAR_MAX_ATTEMPTS} attempts)`
+    : ` (after ${BACKUP_TAR_MAX_ATTEMPTS} attempts)`;
+  throw new Error(`Backup archive write failed: ${final.message}${suffix}`, { cause: final });
+}
+
+export const __test = { writeTarArchiveWithRetry, isTarEofRaceError };
 
 // The temp manifest is passed to `tar.c` alongside the asset source paths. If
 // the temp file lives inside any asset, recursive traversal pulls it in a
@@ -421,6 +491,7 @@ async function snapshotSqliteDatabase(params: {
   const sqlite = requireNodeSqlite();
   const db = new sqlite.DatabaseSync(params.sourcePath);
   try {
+    db.exec(`PRAGMA busy_timeout = ${OPENCLAW_SQLITE_BUSY_TIMEOUT_MS};`);
     try {
       db.exec("PRAGMA wal_checkpoint(FULL);");
     } catch {
@@ -458,10 +529,14 @@ async function stageBackupAssets(params: {
     }
 
     const stagedPath = path.join(params.tempDir, "state-snapshot");
+    const volatilePlan = { stateDirs: [asset.sourcePath] };
     await fs.cp(asset.sourcePath, stagedPath, {
       recursive: true,
       verbatimSymlinks: true,
-      filter: (source) => !isSqliteDatabasePath(source) && !isSqliteSidecarPath(source),
+      filter: (source) =>
+        !isSqliteDatabasePath(source) &&
+        !isSqliteSidecarPath(source) &&
+        !isVolatileBackupPath(source, volatilePlan),
     });
 
     for (const sqlitePath of await listSqliteDatabasePaths(asset.sourcePath)) {
@@ -576,24 +651,29 @@ export async function createBackupArchive(
     const filter = stagedAssets.state
       ? buildExtensionsNodeModulesFilter(stagedAssets.state.stagedPath)
       : undefined;
-    await tar.c(
-      {
-        file: tempArchivePath,
-        ...(filter ? { filter } : {}),
-        gzip: true,
-        portable: true,
-        preservePaths: true,
-        onWriteEntry: (entry) => {
-          entry.path = remapArchiveEntryPath({
-            entryPath: entry.path,
-            manifestPath,
-            archiveRoot,
-            stagedAssets,
-          });
-        },
-      },
-      [manifestPath, ...stagedAssets.archivePaths],
-    );
+    await writeTarArchiveWithRetry({
+      tempArchivePath,
+      log: opts.log,
+      runTar: () =>
+        tar.c(
+          {
+            file: tempArchivePath,
+            ...(filter ? { filter } : {}),
+            gzip: true,
+            portable: true,
+            preservePaths: true,
+            onWriteEntry: (entry) => {
+              entry.path = remapArchiveEntryPath({
+                entryPath: entry.path,
+                manifestPath,
+                archiveRoot,
+                stagedAssets,
+              });
+            },
+          },
+          [manifestPath, ...stagedAssets.archivePaths],
+        ),
+    });
     await publishTempArchive({ tempArchivePath, outputPath });
     if (manifest && result.assets.some((asset) => asset.kind === "state")) {
       recordOpenClawStateBackupRun({

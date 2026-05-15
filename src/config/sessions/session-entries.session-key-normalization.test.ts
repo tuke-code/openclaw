@@ -8,7 +8,7 @@ import {
 } from "../../state/openclaw-agent-db.js";
 import { createSuiteTempRootTracker } from "../../test-helpers/temp-dir.js";
 import { recordSessionMetaFromInbound, updateLastRoute } from "../sessions.js";
-import { listSessionEntries, upsertSessionEntry } from "./store.js";
+import { listSessionEntries, patchSessionEntry, upsertSessionEntry } from "./store.js";
 import type { SessionEntry } from "./types.js";
 
 const CANONICAL_KEY = "agent:main:webchat:dm:mixed-user";
@@ -142,6 +142,33 @@ describe("SQLite session row key normalization", () => {
       channel: "webchat",
       to: "webchat:user-1",
     });
+  });
+
+  it("patches canonical rows when callers pass accepted mixed-case keys", async () => {
+    upsertSessionEntry({
+      agentId: "main",
+      sessionKey: CANONICAL_KEY,
+      entry: {
+        sessionId: "existing-session",
+        updatedAt: 100,
+        chatType: "direct",
+        channel: "webchat",
+      },
+    });
+
+    await patchSessionEntry({
+      agentId: "main",
+      sessionKey: MIXED_CASE_KEY,
+      update: () => ({ updatedAt: 200, modelOverride: "gpt-5.5" }),
+    });
+
+    const store = readMainSessionRows();
+    expect(Object.keys(store)).toEqual([CANONICAL_KEY]);
+    expect(store[CANONICAL_KEY]).toMatchObject({
+      sessionId: "existing-session",
+      modelOverride: "gpt-5.5",
+    });
+    expect(store[CANONICAL_KEY]?.updatedAt).toBeGreaterThan(100);
   });
 
   it("does not migrate legacy mixed-case entries during runtime updates", async () => {

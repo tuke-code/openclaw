@@ -594,6 +594,34 @@ describe("SQLite session row backend", () => {
     });
   });
 
+  it("records inbound metadata in the provided state directory", async () => {
+    const stateDir = createTempDir();
+    const env = { OPENCLAW_STATE_DIR: stateDir };
+
+    await recordSessionMetaFromInbound({
+      agentId: "ops",
+      env,
+      sessionKey: "discord:main",
+      ctx: {
+        Provider: "discord",
+        ChatType: "direct",
+        From: "discord:user:U1",
+        To: "bot",
+        OriginatingChannel: originatingChannel("discord"),
+        OriginatingTo: "user:U1",
+        AccountId: "work",
+        NativeDirectUserId: "U1",
+      },
+    });
+
+    expect(getSessionEntry({ agentId: "ops", env, sessionKey: "discord:main" })).toMatchObject({
+      channel: "discord",
+    });
+    expect(
+      fs.existsSync(path.join(stateDir, "agents", "ops", "agent", "openclaw-agent.sqlite")),
+    ).toBe(true);
+  });
+
   it("stores group conversation identity in typed agent rows", async () => {
     const stateDir = createTempDir();
     const env = { OPENCLAW_STATE_DIR: stateDir };
@@ -690,6 +718,68 @@ describe("SQLite session row backend", () => {
           .orderBy("updated_at", "asc"),
       ).rows,
     ).toEqual([{ session_id: "second-session", session_key: "discord:ops" }]);
+  });
+
+  it("keeps aliased routes bound to their own entry rows", () => {
+    const stateDir = createTempDir();
+    const env = { OPENCLAW_STATE_DIR: stateDir };
+
+    upsertSessionEntry({
+      agentId: "ops",
+      env,
+      sessionKey: "direct:legacy",
+      entry: {
+        sessionId: "shared-session",
+        updatedAt: 100,
+        modelOverride: "legacy-model",
+      },
+    });
+    upsertSessionEntry({
+      agentId: "ops",
+      env,
+      sessionKey: "agent:ops:main",
+      entry: {
+        sessionId: "shared-session",
+        updatedAt: 200,
+        modelOverride: "main-model",
+      },
+    });
+
+    expect(getSessionEntry({ agentId: "ops", env, sessionKey: "direct:legacy" })).toMatchObject({
+      sessionId: "shared-session",
+      modelOverride: "legacy-model",
+    });
+    expect(getSessionEntry({ agentId: "ops", env, sessionKey: "agent:ops:main" })).toMatchObject({
+      sessionId: "shared-session",
+      modelOverride: "main-model",
+    });
+    expect(listSessionEntries({ agentId: "ops", env })).toHaveLength(2);
+    expect(loadSqliteSessionEntries({ agentId: "ops", env })).toMatchObject({
+      "direct:legacy": {
+        sessionId: "shared-session",
+        modelOverride: "legacy-model",
+      },
+      "agent:ops:main": {
+        sessionId: "shared-session",
+        modelOverride: "main-model",
+      },
+    });
+    appendSqliteSessionTranscriptEvent({
+      agentId: "ops",
+      env,
+      sessionId: "shared-session",
+      event: { type: "session", id: "shared-session" },
+    });
+
+    expect(deleteSessionEntry({ agentId: "ops", env, sessionKey: "direct:legacy" })).toBe(true);
+    expect(getSessionEntry({ agentId: "ops", env, sessionKey: "direct:legacy" })).toBeUndefined();
+    expect(getSessionEntry({ agentId: "ops", env, sessionKey: "agent:ops:main" })).toMatchObject({
+      sessionId: "shared-session",
+      modelOverride: "main-model",
+    });
+    expect(
+      hasSqliteSessionTranscriptEvents({ agentId: "ops", env, sessionId: "shared-session" }),
+    ).toBe(true);
   });
 
   it("updates one session entry without replacing the whole SQLite store", async () => {

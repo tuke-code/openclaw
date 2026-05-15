@@ -125,12 +125,13 @@ export async function patchSessionEntry(
       return existing;
     }
     const next = mergeSessionEntry(existing, patch);
+    const normalizedKey = normalizeSessionRowKey(options.sessionKey);
     const applied = applySqliteSessionEntriesPatch({
       agentId: options.agentId,
       env: options.env,
       path: options.path,
-      upsertEntries: { [options.sessionKey]: next },
-      expectedEntries: new Map([[options.sessionKey, expected]]),
+      upsertEntries: { [normalizedKey]: next },
+      expectedEntries: new Map([[normalizedKey, expected]]),
     });
     if (applied) {
       return next;
@@ -176,6 +177,7 @@ function removeThreadFromDeliveryContext(context?: DeliveryContext): DeliveryCon
 
 export async function recordSessionMetaFromInbound(params: {
   agentId?: string;
+  env?: NodeJS.ProcessEnv;
   sessionKey: string;
   ctx: MsgContext;
   groupResolution?: import("./types.js").GroupKeyResolution | null;
@@ -185,6 +187,7 @@ export async function recordSessionMetaFromInbound(params: {
   const createIfMissing = params.createIfMissing ?? true;
   const rowOptions = resolveSessionRowOptionsFromSessionKey({
     agentId: params.agentId,
+    env: params.env,
     sessionKey,
   });
   const normalizedKey = normalizeSessionRowKey(sessionKey);

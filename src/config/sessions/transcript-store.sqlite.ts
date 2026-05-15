@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
-import type { Insertable } from "kysely";
+import { sql, type Insertable } from "kysely";
 import {
+  executeCompiledSqliteQuerySync,
   executeSqliteQuerySync,
   executeSqliteQueryTakeFirstSync,
   getNodeSqliteKysely,
@@ -43,6 +44,11 @@ export type AppendSqliteSessionTranscriptMessageOptions = SqliteSessionTranscrip
 export type ReplaceSqliteSessionTranscriptEventsOptions = SqliteSessionTranscriptStoreOptions & {
   events: unknown[];
   now?: () => number;
+};
+
+export type LoadSqliteSessionTranscriptTailEventsOptions = SqliteSessionTranscriptStoreOptions & {
+  maxBytes?: number;
+  maxEvents: number;
 };
 
 export type SqliteSessionTranscriptScope = {
@@ -98,6 +104,28 @@ function parseTranscriptEventJson(value: unknown, seq: number): unknown {
 
 function parseCreatedAt(value: unknown): number {
   return typeof value === "bigint" ? Number(value) : Number(value);
+}
+
+function parseTranscriptEventRow(row: {
+  seq: number | bigint;
+  event_json: unknown;
+  created_at: unknown;
+}): SqliteSessionTranscriptEvent {
+  const seq = typeof row.seq === "bigint" ? Number(row.seq) : row.seq;
+  return {
+    seq,
+    event: parseTranscriptEventJson(row.event_json, seq),
+    createdAt: parseCreatedAt(row.created_at),
+  };
+}
+
+function parseSqliteCount(value: unknown): number {
+  const count = typeof value === "bigint" ? Number(value) : Number(value ?? 0);
+  return Number.isFinite(count) && count > 0 ? count : 0;
+}
+
+function normalizePositiveInteger(value: number, fallback: number): number {
+  return Number.isFinite(value) && value > 0 ? Math.max(1, Math.floor(value)) : fallback;
 }
 
 function getAgentTranscriptKysely(db: import("node:sqlite").DatabaseSync) {
@@ -631,15 +659,87 @@ export function loadSqliteSessionTranscriptEvents(
       .select(["seq", "event_json", "created_at"])
       .where("session_id", "=", sessionId)
       .orderBy("seq", "asc"),
-  ).rows.map((row) => {
-    const record = row;
-    const seq = typeof record.seq === "bigint" ? Number(record.seq) : record.seq;
-    return {
-      seq,
-      event: parseTranscriptEventJson(record.event_json, seq),
-      createdAt: parseCreatedAt(record.created_at),
-    };
-  });
+  ).rows.map(parseTranscriptEventRow);
+}
+
+export function loadSqliteSessionTranscriptTailEvents(
+  options: LoadSqliteSessionTranscriptTailEventsOptions,
+): SqliteSessionTranscriptEvent[] {
+  const { sessionId } = normalizeTranscriptScope(options);
+  const database = openTranscriptAgentDatabase(options);
+  const maxEvents = normalizePositiveInteger(options.maxEvents, 1);
+  const maxBytes =
+    typeof options.maxBytes === "number" && Number.isFinite(options.maxBytes)
+      ? Math.max(1024, Math.floor(options.maxBytes))
+      : undefined;
+  const rows = executeSqliteQuerySync(
+    database.db,
+    getAgentTranscriptKysely(database.db)
+      .selectFrom("transcript_events")
+      .select(["seq", "event_json", "created_at"])
+      .where("session_id", "=", sessionId)
+      .orderBy("seq", "desc")
+      .limit(maxEvents),
+  ).rows;
+  const selected: typeof rows = [];
+  let bytes = 0;
+  for (const row of rows) {
+    const eventBytes = Buffer.byteLength(row.event_json, "utf8") + 1;
+    if (maxBytes !== undefined && selected.length > 0 && bytes + eventBytes > maxBytes) {
+      break;
+    }
+    selected.push(row);
+    bytes += eventBytes;
+  }
+  return selected.toReversed().map(parseTranscriptEventRow);
+}
+
+export function countSqliteSessionTranscriptDisplayMessages(
+  options: SqliteSessionTranscriptStoreOptions,
+): number {
+  const { sessionId } = normalizeTranscriptScope(options);
+  const database = openTranscriptAgentDatabase(options);
+  const row = executeCompiledSqliteQuerySync(
+    database.db,
+    // kysely-allow-raw: recursive CTE; inputs stay parameterized through Kysely.
+    sql<{
+      parent_link_count?: unknown;
+      active_count?: unknown;
+      fallback_count?: unknown;
+    }>`
+      WITH latest_leaf AS (
+        SELECT event_id
+        FROM transcript_event_identities
+        WHERE session_id = ${sessionId} AND event_type != 'session' AND has_parent = 1
+        ORDER BY seq DESC
+        LIMIT 1
+      ),
+      active_chain(event_id, parent_id, seq, event_type) AS (
+        SELECT event_id, parent_id, seq, event_type
+        FROM transcript_event_identities
+        WHERE session_id = ${sessionId} AND event_id = (SELECT event_id FROM latest_leaf)
+        UNION ALL
+        SELECT parent.event_id, parent.parent_id, parent.seq, parent.event_type
+        FROM transcript_event_identities AS parent
+        JOIN active_chain AS child ON child.parent_id = parent.event_id
+        WHERE parent.session_id = ${sessionId}
+      )
+      SELECT
+        (SELECT COUNT(*) FROM transcript_event_identities WHERE session_id = ${sessionId} AND has_parent = 1) AS parent_link_count,
+        (SELECT COUNT(*) FROM active_chain WHERE event_type != 'session') AS active_count,
+        (
+          SELECT COUNT(*)
+          FROM transcript_events
+          WHERE session_id = ${sessionId}
+            AND (instr(event_json, '"message":') > 0 OR instr(event_json, '"type":"compaction"') > 0)
+        ) AS fallback_count
+      `.compile(getAgentTranscriptKysely(database.db)),
+  ).rows[0];
+  const parentLinkCount = parseSqliteCount(row?.parent_link_count);
+  const activeCount = parseSqliteCount(row?.active_count);
+  return parentLinkCount > 0 && activeCount > 0
+    ? activeCount
+    : parseSqliteCount(row?.fallback_count);
 }
 
 export function hasSqliteSessionTranscriptEvents(
