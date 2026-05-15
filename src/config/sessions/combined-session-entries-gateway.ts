@@ -78,7 +78,10 @@ export function loadCombinedSessionEntriesForGateway(
   const combined: Record<string, SessionEntry> = {};
   for (const target of targets) {
     const agentId = target.agentId;
-    for (const { sessionKey: key, entry } of listSessionEntries({ agentId })) {
+    for (const { sessionKey: key, entry } of listSessionEntries({
+      agentId,
+      path: target.databasePath,
+    })) {
       const canonicalKey = resolveStoredSessionRowKeyForAgent({
         cfg,
         agentId,

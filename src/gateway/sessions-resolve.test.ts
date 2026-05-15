@@ -82,7 +82,13 @@ describe("resolveSessionKeyFromResolveParams", () => {
       })),
     );
     hoisted.filterAndSortSessionEntriesMock.mockImplementation(
-      ({ store }: { store: Record<string, SessionEntry> }) => Object.entries(store),
+      ({ store, opts }: { store: Record<string, SessionEntry>; opts?: { spawnedBy?: string } }) =>
+        Object.entries(store).filter(([, entry]) => {
+          if (!opts?.spawnedBy) {
+            return true;
+          }
+          return entry.spawnedBy === opts.spawnedBy || entry.parentSessionKey === opts.spawnedBy;
+        }),
     );
   });
 

@@ -543,22 +543,21 @@ describe("session.message websocket events", () => {
   });
 
   test("prefers carried transcript sequence for live session events", async () => {
-    const storePath = await createSessionStoreFile();
-    await writeSessionStore({
+    await setupTranscriptFixtureState();
+    await seedGatewaySessionEntries({
       entries: {
         main: {
           sessionId: "sess-main",
           updatedAt: Date.now(),
         },
       },
-      storePath,
     });
 
     await withOperatorSessionSubscriber(async (ws) => {
       const { messageEvent, changedEvent } = await emitTranscriptUpdateAndCollectEvents({
         ws,
         sessionKey: "agent:main:main",
-        sessionFile: path.join(path.dirname(storePath), "missing-transcript.jsonl"),
+        sessionId: "sess-main",
         message: {
           role: "assistant",
           content: [{ type: "text", text: "carried sequence" }],

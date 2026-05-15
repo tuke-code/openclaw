@@ -36,6 +36,7 @@ const SESSION_ROW_PATCH_RETRY_LIMIT = 16;
 type SessionEntryRowOptions = {
   agentId: string;
   env?: NodeJS.ProcessEnv;
+  path?: string;
 };
 
 function resolveSessionRowOptionsFromSessionKey(params: {

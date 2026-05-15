@@ -5,6 +5,7 @@ import path from "node:path";
 import { vi } from "vitest";
 import { upsertSessionEntry } from "../config/sessions/store.js";
 import type { SessionEntry } from "../config/sessions/types.js";
+import { resolveAgentIdFromSessionKey } from "../routing/session-key.js";
 import type { RuntimeEnv } from "../runtime.js";
 import { closeOpenClawAgentDatabasesForTest } from "../state/openclaw-agent-db.js";
 
@@ -86,8 +87,19 @@ export function seedSessionRows(data: unknown, prefix = "sessions"): void {
       ? (data as Record<string, SessionEntry>)
       : {};
   for (const [sessionKey, entry] of Object.entries(entries)) {
-    upsertSessionEntry({ agentId: "main", sessionKey, entry });
+    const agentId = resolveAgentIdFromSessionKey(sessionKey);
+    upsertSessionEntry({ agentId, sessionKey, entry });
+    if (agentId !== "main") {
+      // Legacy command tests model the old single JSON store, where agent-scoped
+      // keys were visible through the default store listing.
+      upsertSessionEntry({ agentId: "main", sessionKey, entry });
+    }
   }
+}
+
+export function writeStore(data: unknown, prefix = "sessions"): Record<string, never> {
+  seedSessionRows(data, prefix);
+  return {};
 }
 
 export async function runSessionsJson<T>(

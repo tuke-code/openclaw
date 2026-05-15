@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { WebSocket } from "ws";
@@ -586,12 +587,12 @@ describe("gateway node command allowlist", () => {
     let configPath: string | undefined;
 
     try {
-      const deviceIdentity = loadOrCreateDeviceIdentity(
-        path.join(
+      const deviceIdentity = loadOrCreateDeviceIdentity({
+        key: path.join(
           os.tmpdir(),
           `openclaw-node-current-allowlist-${Date.now()}-${Math.random()}.json`,
         ),
-      );
+      });
       nodeClient = await connectNodeClientWithPairing({
         port,
         commands: ["canvas.snapshot"],

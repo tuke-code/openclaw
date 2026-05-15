@@ -61,7 +61,7 @@ describe("listSessionsFromStore resolver cache", () => {
       try {
         const result = listSessionsFromStore({
           cfg,
-          storePath: path.join(stateDir, "sessions.json"),
+          databasePath: path.join(stateDir, "openclaw-agent.sqlite"),
           store,
           // sessions.list bounds responses to 100 rows by default; the perf
           // smoke explicitly opts into the full set so the non-lightweight

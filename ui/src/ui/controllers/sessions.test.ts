@@ -486,7 +486,7 @@ describe("loadSessions", () => {
       }
       return {
         ts: 1,
-        path: "(multiple)",
+        databasePath: "(multiple)",
         count: 0,
         defaults: { modelProvider: null, model: null, contextTokens: null },
         sessions: [],
@@ -867,7 +867,7 @@ describe("applySessionsChangedEvent", () => {
     const state = createState(async () => undefined, {
       sessionsResult: {
         ts: 1,
-        path: "(multiple)",
+        databasePath: "(multiple)",
         count: 1,
         defaults: { modelProvider: null, model: null, contextTokens: null },
         sessions: [

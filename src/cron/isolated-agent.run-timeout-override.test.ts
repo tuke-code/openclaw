@@ -2,16 +2,16 @@ import "./isolated-agent.mocks.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { clearAllBootstrapSnapshots } from "../agents/bootstrap-cache.js";
 import { runEmbeddedPiAgent } from "../agents/pi-embedded.js";
-import { clearSessionStoreCacheForTest } from "../config/sessions/store.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { resetAgentRunContextForTest } from "../infra/agent-events.js";
+import { closeOpenClawAgentDatabasesForTest } from "../state/openclaw-agent-db.js";
 import { createCliDeps, mockAgentPayloads } from "./isolated-agent.delivery.test-helpers.js";
 import { runCronIsolatedAgentTurn } from "./isolated-agent.js";
 import {
   makeCfg,
   makeJob,
+  seedCronSessionRows,
   withTempCronHome,
-  writeSessionStoreEntries,
 } from "./isolated-agent.test-harness.js";
 
 function lastEmbeddedCall(): { runTimeoutOverrideMs?: number; timeoutMs?: number } {
@@ -22,10 +22,9 @@ function lastEmbeddedCall(): { runTimeoutOverrideMs?: number; timeoutMs?: number
 
 function makeTimeoutTestCfg(
   home: string,
-  storePath: string,
   timeoutSeconds: number,
 ): OpenClawConfig {
-  return makeCfg(home, storePath, {
+  return makeCfg(home, {
     agents: { defaults: { timeoutSeconds } },
     models: {
       providers: {
@@ -70,7 +69,7 @@ describe("runCronIsolatedAgentTurn — explicit per-run timeout signal", () => {
     vi.doUnmock("../agents/model-selection.js");
     vi.doUnmock("../agents/subagent-announce.js");
     vi.doUnmock("../gateway/call.js");
-    clearSessionStoreCacheForTest();
+    closeOpenClawAgentDatabasesForTest();
     resetAgentRunContextForTest();
     clearAllBootstrapSnapshots();
     vi.restoreAllMocks();
@@ -87,7 +86,7 @@ describe("runCronIsolatedAgentTurn — explicit per-run timeout signal", () => {
   // explicit-vs-default distinction survives the merge into `timeoutMs`.
   it("forwards runTimeoutOverrideMs when payload.timeoutSeconds equals the agent default", async () => {
     await withTempCronHome(async (home) => {
-      const storePath = await writeSessionStoreEntries(home, {
+      await seedCronSessionRows(home, {
         "agent:main:main": {
           sessionId: "main-session",
           updatedAt: Date.now(),
@@ -97,7 +96,7 @@ describe("runCronIsolatedAgentTurn — explicit per-run timeout signal", () => {
       });
       mockAgentPayloads([{ text: "ok" }]);
 
-      const cfg = makeTimeoutTestCfg(home, storePath, 300);
+      const cfg = makeTimeoutTestCfg(home, 300);
 
       await runCronIsolatedAgentTurn({
         cfg,
@@ -117,7 +116,7 @@ describe("runCronIsolatedAgentTurn — explicit per-run timeout signal", () => {
 
   it("forwards runTimeoutOverrideMs when payload.timeoutSeconds differs from the agent default", async () => {
     await withTempCronHome(async (home) => {
-      const storePath = await writeSessionStoreEntries(home, {
+      await seedCronSessionRows(home, {
         "agent:main:main": {
           sessionId: "main-session",
           updatedAt: Date.now(),
@@ -127,7 +126,7 @@ describe("runCronIsolatedAgentTurn — explicit per-run timeout signal", () => {
       });
       mockAgentPayloads([{ text: "ok" }]);
 
-      const cfg = makeTimeoutTestCfg(home, storePath, 300);
+      const cfg = makeTimeoutTestCfg(home, 300);
 
       await runCronIsolatedAgentTurn({
         cfg,
@@ -147,7 +146,7 @@ describe("runCronIsolatedAgentTurn — explicit per-run timeout signal", () => {
 
   it("leaves runTimeoutOverrideMs undefined when payload omits timeoutSeconds", async () => {
     await withTempCronHome(async (home) => {
-      const storePath = await writeSessionStoreEntries(home, {
+      await seedCronSessionRows(home, {
         "agent:main:main": {
           sessionId: "main-session",
           updatedAt: Date.now(),
@@ -157,7 +156,7 @@ describe("runCronIsolatedAgentTurn — explicit per-run timeout signal", () => {
       });
       mockAgentPayloads([{ text: "ok" }]);
 
-      const cfg = makeTimeoutTestCfg(home, storePath, 300);
+      const cfg = makeTimeoutTestCfg(home, 300);
 
       await runCronIsolatedAgentTurn({
         cfg,

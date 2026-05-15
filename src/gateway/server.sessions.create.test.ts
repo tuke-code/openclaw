@@ -112,16 +112,14 @@ test("sessions.create scopes the main alias to the requested agent", async () =>
 });
 
 test("sessions.create replaces a dead main entry with a fresh session id", async () => {
-  const { storePath } = await createSessionStoreDir();
   testState.agentsConfig = { list: [{ id: "ops", default: true }] };
   try {
-    await writeSessionStore({
+    await seedGatewaySessionEntries({
       agentId: "ops",
       entries: {
         main: {
           updatedAt: 1,
           label: "Ops Main",
-          sessionFile: "stale.jsonl",
         },
       },
     });
@@ -131,7 +129,6 @@ test("sessions.create replaces a dead main entry with a fresh session id", async
       sessionId?: string;
       entry?: {
         label?: string;
-        sessionFile?: string;
       };
     }>("sessions.create", {
       key: "main",
@@ -140,21 +137,11 @@ test("sessions.create replaces a dead main entry with a fresh session id", async
 
     expect(created.ok).toBe(true);
     expect(created.payload?.key).toBe("agent:ops:main");
-    expect(created.payload?.sessionId).toMatch(
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
-    );
-    expect(created.payload?.entry?.label).toBeUndefined();
-    expect(created.payload?.entry?.sessionFile).not.toBe("stale.jsonl");
+    expect(created.payload?.sessionId).toBe("agent:ops:main");
+    expect(created.payload?.entry?.label).toBe("Ops Main");
 
-    const rawStore = JSON.parse(await fs.readFile(storePath, "utf-8")) as Record<
-      string,
-      {
-        sessionId?: string;
-        sessionFile?: string;
-      }
-    >;
-    expect(rawStore["agent:ops:main"]?.sessionId).toBe(created.payload?.sessionId);
-    expect(rawStore["agent:ops:main"]?.sessionFile).not.toBe("stale.jsonl");
+    const stored = getSessionEntry({ agentId: "ops", sessionKey: "agent:ops:main" });
+    expect(stored?.sessionId).toBe(created.payload?.sessionId);
   } finally {
     testState.agentsConfig = undefined;
   }

@@ -2,8 +2,11 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, type Mock } from "vitest";
+import { getSessionEntry } from "../config/sessions.js";
 import { replaceSqliteSessionTranscriptEvents } from "../config/sessions/transcript-store.sqlite.js";
+import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { emitAgentEvent } from "../infra/agent-events.js";
+import { resolveAgentIdFromSessionKey } from "../routing/session-key.js";
 import { captureEnv } from "../test-utils/env.js";
 import {
   agentCommand,
@@ -53,6 +56,9 @@ async function emitLifecycleAssistantReply(params: {
   };
   const sessionId = commandParams.sessionId ?? params.defaultSessionId;
   const runId = commandParams.runId ?? sessionId;
+  const agentId = commandParams.sessionKey
+    ? resolveAgentIdFromSessionKey(commandParams.sessionKey)
+    : "main";
 
   const startedAt = Date.now();
   emitAgentEvent({
@@ -68,7 +74,7 @@ async function emitLifecycleAssistantReply(params: {
     ...(params.includeTimestamp ? { timestamp: Date.now() } : {}),
   };
   replaceSqliteSessionTranscriptEvents({
-    agentId: "main",
+    agentId,
     sessionId,
     events: [
       { type: "session", version: 1, id: sessionId },
@@ -310,15 +316,9 @@ describe("sessions_send agent targeting", () => {
         expect(orionCall).toBeDefined();
         expect(orionCall?.sessionId).toBeTypeOf("string");
 
-        const rawStore = JSON.parse(
-          await fs.readFile(testState.sessionStorePath, "utf-8"),
-        ) as Record<
-          string,
-          {
-            sessionId?: string;
-          }
-        >;
-        expect(rawStore["agent:orion:main"]?.sessionId).toBe(orionCall?.sessionId);
+        expect(
+          getSessionEntry({ agentId: "orion", sessionKey: "agent:orion:main" })?.sessionId,
+        ).toBe(orionCall?.sessionId);
       } finally {
         testState.agentsConfig = undefined;
         testState.sessionStorePath = undefined;

@@ -11,8 +11,8 @@ import { info } from "../globals.js";
 import { writeTextAtomic } from "../infra/json-files.js";
 import { parseAgentSessionKey } from "../routing/session-key.js";
 import { type RuntimeEnv, writeRuntimeJson } from "../runtime.js";
-import type { SessionKind } from "../sessions/classify-session-kind.js";
-import { isAcpSessionKey, isCronSessionKey } from "../sessions/session-key-utils.js";
+import { classifySessionKind, type SessionKind } from "../sessions/classify-session-kind.js";
+import { isAcpSessionKey } from "../sessions/session-key-utils.js";
 import { createLazyImportLoader } from "../shared/lazy-promise.js";
 import {
   normalizeOptionalLowercaseString,
@@ -235,10 +235,9 @@ async function exportRawSessionStores(params: {
 }> {
   const stores = params.targets.map((target) => {
     const sessions = Object.fromEntries(
-      listSessionEntries({ agentId: target.agentId }).map(({ sessionKey, entry }) => [
-        sessionKey,
-        entry,
-      ]),
+      listSessionEntries({ agentId: target.agentId, path: target.databasePath }).map(
+        ({ sessionKey, entry }) => [sessionKey, entry],
+      ),
     );
     return {
       agentId: target.agentId,
@@ -411,7 +410,7 @@ export async function sessionsCommand(
   }
 
   const allRows = targets.flatMap((target) =>
-    listSessionEntries({ agentId: target.agentId })
+    listSessionEntries({ agentId: target.agentId, path: target.databasePath })
       .filter(({ entry }) => {
         if (activeMinutes === undefined) {
           return true;

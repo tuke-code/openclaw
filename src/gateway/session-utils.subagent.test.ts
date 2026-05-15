@@ -1,3 +1,4 @@
+import path from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import {
   addSubagentRunForTests,
@@ -6,6 +7,7 @@ import {
 import type { OpenClawConfig } from "../config/config.js";
 import { getSessionEntry, upsertSessionEntry, type SessionEntry } from "../config/sessions.js";
 import { registerAgentRunContext, resetAgentRunContextForTest } from "../infra/agent-events.js";
+import { openOpenClawAgentDatabase } from "../state/openclaw-agent-db.js";
 import { withStateDirEnv } from "../test-helpers/state-dir-env.js";
 import {
   listSessionsFromStore,
@@ -1146,6 +1148,32 @@ describe("loadCombinedSessionEntriesForGateway includes SQLite-registered agents
 
       expect(entries["agent:codex:acp-task"]?.sessionId).toBe("s-codex");
       expect(entries["agent:main:main"]).toBeUndefined();
+    });
+  });
+
+  test("reads rows from registered non-default agent database paths", async () => {
+    await withStateDirEnv("openclaw-acp-registered-path-", async ({ tempRoot }) => {
+      const databasePath = path.join(tempRoot, "relocated", "retired.sqlite");
+      openOpenClawAgentDatabase({ agentId: "retired", path: databasePath });
+      upsertSessionEntry({
+        agentId: "retired",
+        path: databasePath,
+        sessionKey: "agent:retired:archived-task",
+        entry: { sessionId: "s-retired", updatedAt: 300 },
+      });
+
+      const cfg = {
+        session: {
+          mainKey: "main",
+        },
+        agents: {
+          list: [{ id: "main", default: true }],
+        },
+      } as OpenClawConfig;
+
+      const { entries } = loadCombinedSessionEntriesForGateway(cfg);
+
+      expect(entries["agent:retired:archived-task"]?.sessionId).toBe("s-retired");
     });
   });
 

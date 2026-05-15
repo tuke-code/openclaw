@@ -9,6 +9,7 @@ export {
   testState,
   testTailnetIPv4,
   testTailscaleWhois,
+  writeSessionStore,
 } from "./test-helpers.runtime-state.js";
 export { resetTestPluginRegistry, setTestPluginRegistry } from "./test-helpers.plugin-registry.js";
 export {

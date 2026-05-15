@@ -1,4 +1,5 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import type { OpenClawConfig } from "../config/types.js";
 import type { Model } from "./pi-ai-contract.js";
 
 const hoisted = vi.hoisted(() => ({

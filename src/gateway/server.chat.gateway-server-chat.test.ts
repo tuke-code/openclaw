@@ -20,6 +20,7 @@ import {
   trackConnectChallengeNonce,
   withGatewayServer,
   seedGatewaySessionEntries,
+  writeSessionStore,
 } from "./test-helpers.js";
 import { agentCommand } from "./test-helpers.runtime-state.js";
 import { installConnectedControlUiServerSuite } from "./test-with-server.js";
@@ -277,13 +278,9 @@ describe("gateway server chat", () => {
       expect(res.ok).toBe(true);
       expect(res.payload?.runId).toBe("idem-sessions-send-orion");
 
-      const rawStore = JSON.parse(await fs.readFile(testState.sessionStorePath, "utf-8")) as Record<
-        string,
-        {
-          sessionId?: string;
-        }
-      >;
-      expect(rawStore["agent:orion:main"]?.sessionId).toBeTypeOf("string");
+      expect(
+        getSessionEntry({ agentId: "orion", sessionKey: "agent:orion:main" })?.sessionId,
+      ).toBeTypeOf("string");
     } finally {
       testState.agentsConfig = undefined;
       testState.sessionStorePath = undefined;

@@ -1,7 +1,15 @@
 import { resetPluginStateStoreForTests } from "openclaw/plugin-sdk/plugin-state-runtime";
 import { withOpenClawTestState } from "openclaw/plugin-sdk/test-env";
 import { afterEach, describe, expect, it } from "vitest";
-import { createAcpxProcessLeaseStore, type AcpxProcessLease } from "./process-lease.js";
+import {
+  createAcpxProcessLeaseStore,
+  OPENCLAW_ACPX_LEASE_ID_ARG,
+  OPENCLAW_ACPX_LEASE_ID_ENV,
+  OPENCLAW_GATEWAY_INSTANCE_ID_ARG,
+  OPENCLAW_GATEWAY_INSTANCE_ID_ENV,
+  type AcpxProcessLease,
+  withAcpxLeaseEnvironment,
+} from "./process-lease.js";
 
 function makeLease(index: number): AcpxProcessLease {
   return {

@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { getReplyPayloadMetadata } from "../../../auto-reply/reply-payload.js";
+import type { InteractiveReply, MessagePresentation } from "../../../interactive/payload.js";
 import type { AssistantMessage } from "../../pi-ai-contract.js";
 import {
   buildPayloads,

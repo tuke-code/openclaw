@@ -592,7 +592,7 @@ describe("prepareAcpxCodexAuthConfig", () => {
 
     await prepareAcpxCodexAuthConfig({
       pluginConfig,
-      stateDir,
+      wrapperRoot: stateDir,
       resolveInstalledCodexAcpBinPath: async () => path.join(root, "codex-acp.js"),
     });
 
@@ -610,7 +610,7 @@ describe("prepareAcpxCodexAuthConfig", () => {
     ).rejects.toMatchObject({ code: 1 });
 
     const log = await fs.readFile(
-      path.join(stateDir, "acpx", "codex-acp-wrapper.stderr.lease-secret.log"),
+      path.join(stateDir, "codex-acp-wrapper.stderr.lease-secret.log"),
       "utf8",
     );
     expect(log).toContain("token=[REDACTED]");
@@ -633,7 +633,7 @@ describe("prepareAcpxCodexAuthConfig", () => {
     expect(log).not.toContain("private-secret-body");
     expect(log).not.toContain("truncated-private-secret");
     expect(log).not.toContain("tail-secret-1234567890");
-    await expectPathMissing(path.join(stateDir, "acpx", "codex-acp-wrapper.stderr.log"));
+    await expectPathMissing(path.join(stateDir, "codex-acp-wrapper.stderr.log"));
   });
 
   it("leaves a custom Claude agent command alone", async () => {

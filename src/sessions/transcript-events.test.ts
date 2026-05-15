@@ -52,22 +52,22 @@ describe("transcript events", () => {
     cleanup.push(onSessionTranscriptUpdate(listener));
 
     emitSessionTranscriptUpdate({
-      sessionFile: "/tmp/session.jsonl",
+      sessionId: "session",
       messageSeq: 0,
     });
     emitSessionTranscriptUpdate({
-      sessionFile: "/tmp/session.jsonl",
+      sessionId: "session",
       messageSeq: 1.5,
     });
     emitSessionTranscriptUpdate({
-      sessionFile: "/tmp/session.jsonl",
+      sessionId: "session",
       messageSeq: Number.POSITIVE_INFINITY,
     });
 
     expect(listener).toHaveBeenCalledTimes(3);
-    expect(listener).toHaveBeenNthCalledWith(1, { sessionFile: "/tmp/session.jsonl" });
-    expect(listener).toHaveBeenNthCalledWith(2, { sessionFile: "/tmp/session.jsonl" });
-    expect(listener).toHaveBeenNthCalledWith(3, { sessionFile: "/tmp/session.jsonl" });
+    expect(listener).toHaveBeenNthCalledWith(1, { sessionId: "session" });
+    expect(listener).toHaveBeenNthCalledWith(2, { sessionId: "session" });
+    expect(listener).toHaveBeenNthCalledWith(3, { sessionId: "session" });
   });
 
   it("continues notifying other listeners when one throws", () => {

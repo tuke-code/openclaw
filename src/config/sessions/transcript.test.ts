@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { repairToolUseResultPairing } from "../../agents/session-transcript-repair.js";
 import * as transcriptEvents from "../../sessions/transcript-events.js";
 import type { SessionTranscriptUpdate } from "../../sessions/transcript-events.js";
 import { closeOpenClawAgentDatabasesForTest } from "../../state/openclaw-agent-db.js";
@@ -547,12 +548,12 @@ describe("appendAssistantMessageToSessionTranscript", () => {
   });
 
   it("keeps delivery mirrors in transcripts while repair preserves real tool results", async () => {
-    writeTranscriptStore();
-    const sessionFile = resolveSessionTranscriptPathInDir(sessionId, fixture.sessionsDir());
+    await writeTranscriptStore();
     const toolCallId = "call_maniple_list";
 
     const toolCallResult = await appendSessionTranscriptMessage({
-      transcriptPath: sessionFile,
+      agentId: "main",
+      sessionId,
       message: {
         role: "assistant",
         content: [
@@ -570,7 +571,6 @@ describe("appendAssistantMessageToSessionTranscript", () => {
     const mirrorResult = await appendAssistantMessageToSessionTranscript({
       sessionKey,
       text: "Maniple List Workers",
-      storePath: fixture.storePath(),
     });
 
     expect(mirrorResult.ok).toBe(true);
@@ -578,13 +578,13 @@ describe("appendAssistantMessageToSessionTranscript", () => {
       return;
     }
     expect(mirrorResult.messageId).not.toBe(toolCallResult.messageId);
-    const linesAfterMirror = fs.readFileSync(sessionFile, "utf-8").trim().split("\n");
-    expect(linesAfterMirror).toHaveLength(3);
-    const mirrorLine = JSON.parse(linesAfterMirror[2]);
-    expect(mirrorLine.message.model).toBe("delivery-mirror");
+    const eventsAfterMirror = readEvents();
+    expect(eventsAfterMirror).toHaveLength(3);
+    expect(eventsAfterMirror[2]?.message?.model).toBe("delivery-mirror");
 
     await appendSessionTranscriptMessage({
-      transcriptPath: sessionFile,
+      agentId: "main",
+      sessionId,
       message: {
         role: "toolResult",
         toolCallId,
@@ -594,11 +594,8 @@ describe("appendAssistantMessageToSessionTranscript", () => {
       },
     });
 
-    const messages = fs
-      .readFileSync(sessionFile, "utf-8")
-      .trim()
-      .split("\n")
-      .map((line) => JSON.parse(line) as { message?: TranscriptRepairMessage })
+    const messages = readEvents()
+      .map((event) => event as { message?: TranscriptRepairMessage })
       .flatMap((entry) => (entry.message ? [entry.message] : []));
     expect(messages.map((message) => message.role)).toEqual([
       "assistant",

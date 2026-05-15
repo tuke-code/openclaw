@@ -88,7 +88,7 @@ function createHealthSummary(): HealthSummary {
     defaultAgentId: "main",
     agents: [],
     sessions: {
-      path: "",
+      databasePath: "",
       count: 0,
       recent: [],
     },

@@ -6,6 +6,7 @@ import {
   appendExactAssistantMessageToSessionTranscript,
 } from "../config/sessions/transcript.js";
 import { executeSqliteQuerySync, getNodeSqliteKysely } from "../infra/kysely-sync.js";
+import { emitSessionTranscriptUpdate } from "../sessions/transcript-events.js";
 import type { DB as OpenClawAgentKyselyDatabase } from "../state/openclaw-agent-db.generated.js";
 import { runOpenClawAgentWriteTransaction } from "../state/openclaw-agent-db.js";
 import {
@@ -624,40 +625,41 @@ describe("session history HTTP endpoints", () => {
   });
 
   test("refreshes SSE history for non-monotonic carried sequence", async () => {
-    const storePath = await createSessionStoreFile();
-    const transcriptPath = path.join(path.dirname(storePath), "sess-main.jsonl");
-    await writeSessionStore({
+    await seedGatewaySessionEntries({
       entries: {
         main: {
           sessionId: "sess-main",
-          sessionFile: transcriptPath,
           updatedAt: Date.now(),
         },
       },
-      storePath,
     });
-    await fs.writeFile(
-      transcriptPath,
-      [
-        JSON.stringify({ type: "session", version: 1, id: "sess-main" }),
-        JSON.stringify({
+    replaceSqliteSessionTranscriptEvents({
+      agentId: AGENT_ID,
+      sessionId: "sess-main",
+      events: [
+        { type: "session", version: 1, id: "sess-main" },
+        {
           id: "msg-first",
+          type: "message",
+          parentId: null,
           message: makeTranscriptAssistantMessage({ text: "first message" }),
-        }),
-        JSON.stringify({
+        },
+        {
           id: "msg-second",
+          type: "message",
+          parentId: "msg-first",
           message: makeTranscriptAssistantMessage({ text: "second message" }),
-        }),
-      ].join("\n"),
-      "utf-8",
-    );
+        },
+      ],
+    });
 
     await withGatewayHarness(async (harness) => {
       const stream = await openSessionHistorySse(harness.port, "agent:main:main");
       await expectHistoryEventTexts(stream, ["first message", "second message"]);
 
       emitSessionTranscriptUpdate({
-        sessionFile: transcriptPath,
+        agentId: AGENT_ID,
+        sessionId: "sess-main",
         sessionKey: "agent:main:main",
         message: makeTranscriptAssistantMessage({ text: "rewound branch message" }),
         messageId: "msg-rewound",

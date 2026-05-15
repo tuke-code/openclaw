@@ -140,7 +140,7 @@ describe("overview view rendering", () => {
     const props = createOverviewProps({
       sessionsResult: {
         ts: 0,
-        path: "",
+        databasePath: "",
         count: 3,
         defaults: { modelProvider: "openai", model: "gpt-5", contextTokens: null },
         sessions: [

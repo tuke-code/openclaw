@@ -138,7 +138,12 @@ describe("sessionsCommand default store agent selection", () => {
 
     await sessionsCommand({}, runtime);
 
-    expect(listSessionEntriesMock).toHaveBeenCalledWith({ agentId: "voice" });
+    expect(listSessionEntriesMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentId: "voice",
+        path: expect.stringContaining("agents/voice/agent/openclaw-agent.sqlite"),
+      }),
+    );
     expect(logs[0]).toContain("Session database:");
     expect(logs[0]).toContain("agents/voice/agent/openclaw-agent.sqlite");
   });
@@ -159,8 +164,20 @@ describe("sessionsCommand default store agent selection", () => {
 
     await sessionsCommand({ allAgents: true }, runtime);
 
-    expect(listSessionEntriesMock).toHaveBeenNthCalledWith(1, { agentId: "main" });
-    expect(listSessionEntriesMock).toHaveBeenNthCalledWith(2, { agentId: "voice" });
+    expect(listSessionEntriesMock).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        agentId: "main",
+        path: expect.stringContaining("agents/main/agent/openclaw-agent.sqlite"),
+      }),
+    );
+    expect(listSessionEntriesMock).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        agentId: "voice",
+        path: expect.stringContaining("agents/voice/agent/openclaw-agent.sqlite"),
+      }),
+    );
     expect(logs[0]).toContain("Session databases: 2 (main, voice)");
     expect(logs[2]).toContain("Agent");
   });

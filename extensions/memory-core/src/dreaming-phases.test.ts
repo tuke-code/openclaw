@@ -70,6 +70,10 @@ function requireCandidateByKey<T extends { key: string }>(candidates: T[], key: 
   return candidate;
 }
 
+function dailyCapStressLines(label: string): string[] {
+  return Array.from({ length: 40 }, (_, index) => `${label} line ${index + 1}`);
+}
+
 async function readSessionIngestion(
   workspaceDir: string,
   day: string,
@@ -854,7 +858,7 @@ describe("memory-core dreaming phases", () => {
       minUniqueQueries: 0,
       nowMs: Date.parse("2026-04-05T10:05:00.000Z"),
     });
-    expect(after.some((entry) => entry.path === "memory/2026-04-05.md")).toBe(true);
+    expect(after.map((entry) => entry.path)).toContain("memory/2026-04-05.md");
     expect(after.some((entry) => entry.snippet.includes("Canonical daily note"))).toBe(true);
   });
 
@@ -877,13 +881,16 @@ describe("memory-core dreaming phases", () => {
       );
     }
 
-    await seedHistoricalDailyMemorySignals({
-      workspaceDir,
-      filePaths: [...sluggedPaths, canonicalPath],
-      limit: 1,
-      nowMs: Date.parse("2026-04-05T10:05:00.000Z"),
-      timezone: "UTC",
-    });
+    const seeded = await withWorkspaceStateEnv(workspaceDir, () =>
+      seedHistoricalDailyMemorySignals({
+        workspaceDir,
+        filePaths: [...sluggedPaths, canonicalPath],
+        limit: 1,
+        nowMs: Date.parse("2026-04-05T10:05:00.000Z"),
+        timezone: "UTC",
+      }),
+    );
+    expect(seeded.importedFileCount).toBeGreaterThan(0);
 
     const after = await rankShortTermPromotionCandidates({
       workspaceDir,
@@ -892,7 +899,7 @@ describe("memory-core dreaming phases", () => {
       minUniqueQueries: 0,
       nowMs: Date.parse("2026-04-05T10:05:00.000Z"),
     });
-    expect(after.some((entry) => entry.path === "memory/2026-04-05.md")).toBe(true);
+    expect(after.map((entry) => entry.path)).toContain("memory/2026-04-05.md");
     expect(after.some((entry) => entry.snippet.includes("Canonical seeded note"))).toBe(true);
   });
 
