@@ -26,7 +26,6 @@ const {
 } = vi.hoisted(() => ({
   appendAssistantMessageToSessionTranscriptMock: vi.fn().mockResolvedValue({
     ok: true,
-    sessionFile: "session.jsonl",
     messageId: "mirror-message",
   }),
   countActiveDescendantRunsMock: vi.fn().mockReturnValue(0),
@@ -314,7 +313,6 @@ describe("dispatchCronDelivery — double-announce guard", () => {
     vi.mocked(ensureOutboundSessionEntry).mockResolvedValue(undefined);
     vi.mocked(appendAssistantMessageToSessionTranscript).mockResolvedValue({
       ok: true,
-      sessionFile: "session.jsonl",
       messageId: "mirror-message",
     });
     maybeApplyTtsToPayloadMock.mockReset().mockImplementation(async (params) => params.payload);

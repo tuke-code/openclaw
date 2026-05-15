@@ -450,14 +450,13 @@ describe("agentCommand", () => {
 
   it("installs a local gateway request scope for embedded agent dispatch", async () => {
     await withTempHome(async (home) => {
-      const store = path.join(home, "sessions.json");
-      mockConfig(home, store);
+      mockConfig(home);
       const { getPluginRuntimeGatewayRequestScope } =
         await import("../plugins/runtime/gateway-request-scope.js");
       vi.mocked(attemptExecutionRuntime.runAgentAttempt).mockImplementationOnce(async () => {
         const scope = getPluginRuntimeGatewayRequestScope();
         expect(scope?.context?.getRuntimeConfig()).toMatchObject({
-          session: { store },
+          session: { mainKey: "main" },
         });
         return createDefaultAgentResult();
       });

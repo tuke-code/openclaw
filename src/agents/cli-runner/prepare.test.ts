@@ -1081,7 +1081,7 @@ describe("shouldSkipLocalCliCredentialEpoch", () => {
   });
 
   it("passes current turn kind into bundle MCP loopback env", async () => {
-    const { dir, sessionFile } = createSessionFile();
+    const { dir } = createTranscriptStateFixture();
     try {
       const getActiveMcpLoopbackRuntime = vi.fn(() => ({
         port: 31783,
@@ -1117,7 +1117,6 @@ describe("shouldSkipLocalCliCredentialEpoch", () => {
       const context = await prepareCliRunContext({
         sessionId: "session-test",
         sessionKey: "agent:main:telegram:group:chat123",
-        sessionFile,
         workspaceDir: dir,
         prompt: "latest ask",
         provider: "native-cli",
