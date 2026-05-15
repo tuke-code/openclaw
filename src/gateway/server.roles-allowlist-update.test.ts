@@ -733,7 +733,7 @@ describe("gateway node command allowlist", () => {
       os.tmpdir(),
       `openclaw-client-id-promotion-${Date.now()}-${Math.random().toString(36).slice(2)}.json`,
     );
-    const deviceIdentity = loadOrCreateDeviceIdentity(deviceIdentityPath);
+    const deviceIdentity = loadOrCreateDeviceIdentity({ key: deviceIdentityPath });
     const displayName = "node-client-id-promotion";
 
     let macClient: GatewayClient | undefined;
@@ -798,7 +798,7 @@ describe("gateway node command allowlist", () => {
       os.tmpdir(),
       `openclaw-node-host-platform-upgrade-${Date.now()}-${Math.random().toString(36).slice(2)}.json`,
     );
-    const deviceIdentity = loadOrCreateDeviceIdentity(deviceIdentityPath);
+    const deviceIdentity = loadOrCreateDeviceIdentity({ key: deviceIdentityPath });
     const displayName = "node-host-platform-upgrade";
 
     let legacyClient: GatewayClient | undefined;
