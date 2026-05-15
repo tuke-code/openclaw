@@ -185,6 +185,46 @@ async function pruneEmptyMediaDirs(dir: string, root: string): Promise<void> {
   await pruneEmptyMediaDirs(path.dirname(dir), root);
 }
 
+async function collectExpiredMaterializedMediaFiles(params: {
+  dir: string;
+  cutoff: number;
+  recursive: boolean;
+}): Promise<string[]> {
+  let entries: Dirent[];
+  try {
+    entries = await fs.readdir(params.dir, { withFileTypes: true });
+  } catch (error) {
+    if (isMissingPathError(error)) {
+      return [];
+    }
+    throw error;
+  }
+  const expired: string[] = [];
+  for (const entry of entries) {
+    const entryPath = path.join(params.dir, entry.name);
+    if (entry.isDirectory()) {
+      if (params.recursive) {
+        expired.push(
+          ...(await collectExpiredMaterializedMediaFiles({
+            dir: entryPath,
+            cutoff: params.cutoff,
+            recursive: params.recursive,
+          })),
+        );
+      }
+      continue;
+    }
+    if (!entry.isFile()) {
+      continue;
+    }
+    const stat = await fs.stat(entryPath).catch(() => null);
+    if (stat?.isFile() && stat.mtimeMs < params.cutoff) {
+      expired.push(entryPath);
+    }
+  }
+  return expired;
+}
+
 function upsertMediaBlob(params: {
   subdir: string;
   id: string;
@@ -314,6 +354,7 @@ export async function importLegacyMediaFilesToSqlite(
         id: candidate.id,
         buffer,
         contentType,
+        state: { env },
       });
       result.imported += 1;
       await fs.rm(candidate.path, { force: true });
@@ -361,6 +402,8 @@ async function retryAfterRecreatingDir<T>(dir: string, run: () => Promise<T>): P
 
 export async function cleanOldMedia(ttlMs = DEFAULT_TTL_MS, options: CleanOldMediaOptions = {}) {
   const cutoff = Date.now() - ttlMs;
+  const materializationRoot = resolveMediaMaterializationRoot();
+  const recursive = options.recursive ?? true;
   const expiredRows = runOpenClawStateWriteTransaction((database) => {
     const baseQuery = getMediaKysely(database.db)
       .selectFrom("media_blobs")
@@ -382,14 +425,22 @@ export async function cleanOldMedia(ttlMs = DEFAULT_TTL_MS, options: CleanOldMed
     }
     return rows;
   });
-  const materializationRoot = resolveMediaMaterializationRoot();
   const removedDirs = new Set<string>();
   for (const row of expiredRows) {
     const filePath = path.join(resolveMediaScopedDir(row.subdir, "cleanOldMedia"), row.id);
     await fs.rm(filePath, { force: true }).catch(() => {});
     removedDirs.add(path.dirname(filePath));
   }
-  if (options.pruneEmptyDirs || options.recursive !== false) {
+  const expiredMaterializedFiles = await collectExpiredMaterializedMediaFiles({
+    dir: materializationRoot,
+    cutoff,
+    recursive,
+  });
+  for (const filePath of expiredMaterializedFiles) {
+    await fs.rm(filePath, { force: true }).catch(() => {});
+    removedDirs.add(path.dirname(filePath));
+  }
+  if (options.pruneEmptyDirs || recursive) {
     for (const dir of removedDirs) {
       await pruneEmptyMediaDirs(dir, materializationRoot);
     }
