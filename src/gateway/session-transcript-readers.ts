@@ -126,6 +126,7 @@ function sqliteTranscriptEventToRecord(event: unknown): TailTranscriptRecord | n
 
 function loadScopedTranscriptRecords(params: {
   agentId?: string;
+  path?: string;
   sessionId: string;
 }): TailTranscriptRecord[] | undefined {
   return loadScopedTranscriptEvents(params)?.flatMap((event) => {
@@ -136,6 +137,7 @@ function loadScopedTranscriptRecords(params: {
 
 function loadScopedTranscriptTailRecords(params: {
   agentId?: string;
+  path?: string;
   maxBytes?: number;
   maxEvents: number;
   sessionId: string;
@@ -245,6 +247,7 @@ function transcriptRecordsToMessages(records: TailTranscriptRecord[]): unknown[]
 
 function loadScopedSessionMessages(params: {
   agentId?: string;
+  path?: string;
   sessionId: string;
 }): unknown[] | undefined {
   const records = loadScopedTranscriptRecords(params);
@@ -253,6 +256,7 @@ function loadScopedSessionMessages(params: {
 
 function loadScopedRecentSessionMessages(params: {
   agentId?: string;
+  path?: string;
   maxBytes?: number;
   maxMessages: number;
   maxLines?: number;
@@ -264,6 +268,7 @@ function loadScopedRecentSessionMessages(params: {
   );
   const records = loadScopedTranscriptTailRecords({
     agentId: params.agentId,
+    path: params.path,
     maxEvents,
     sessionId: params.sessionId,
     ...(params.maxBytes !== undefined ? { maxBytes: params.maxBytes } : {}),
@@ -275,6 +280,7 @@ function loadScopedRecentSessionMessages(params: {
 
 function countScopedSessionMessages(params: {
   agentId?: string;
+  path?: string;
   sessionId: string;
 }): number | undefined {
   if (!params.sessionId.trim()) {
@@ -283,6 +289,7 @@ function countScopedSessionMessages(params: {
   try {
     const scope = resolveSqliteSessionTranscriptScope({
       agentId: params.agentId,
+      path: params.path,
       sessionId: params.sessionId,
     });
     if (!scope || !hasSqliteSessionTranscriptEvents(scope)) {
@@ -330,6 +337,7 @@ export function readRecentSessionMessages(
   return (
     loadScopedRecentSessionMessages({
       agentId: scope.agentId,
+      path: scope.path,
       sessionId: scope.sessionId,
       maxMessages,
       ...(opts?.maxBytes !== undefined ? { maxBytes: opts.maxBytes } : {}),
@@ -758,7 +766,13 @@ function extractLatestUsageFromTranscriptEvents(
   return latest;
 }
 
-function loadUsageEvents(params: { sessionId: string; agentId?: string }): unknown[] | undefined {
+function loadUsageEvents(params: {
+  sessionId: string;
+  agentId?: string;
+  path?: string;
+}): unknown[] | undefined {
+  // Usage callers pass SessionTranscriptReadScope; keep the signature aligned so custom DB paths
+  // stay scoped even though most call sites only need the default agent database.
   return loadScopedTranscriptEvents(params);
 }
 

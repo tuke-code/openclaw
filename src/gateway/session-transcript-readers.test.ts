@@ -54,6 +54,7 @@ function setupState(prefix = "openclaw-session-utils-sqlite-") {
 function seedTranscript(params: {
   sessionId: string;
   agentId?: string;
+  path?: string;
   events: TranscriptEvent[];
 }) {
   if (!stateDir) {
@@ -62,6 +63,7 @@ function seedTranscript(params: {
   const agentId = params.agentId ?? "main";
   replaceSqliteSessionTranscriptEvents({
     agentId,
+    path: params.path,
     sessionId: params.sessionId,
     events: params.events,
     now: () => 1_778_100_000_000,
@@ -244,6 +246,45 @@ describe("SQLite transcript readers", () => {
     ).resolves.toMatchObject({
       totalMessages: 4,
       messages: [{ __openclaw: { seq: 4 }, content: "four" }],
+    });
+  });
+
+  test("preserves explicit SQLite database paths for scoped transcript reads", () => {
+    setupState();
+    const sessionId = "custom-db-session";
+    const customPath = path.join(stateDir, "registered", "ops.sqlite");
+    const scope = { agentId: "ops", path: customPath, sessionId };
+    seedTranscript({
+      agentId: "ops",
+      path: customPath,
+      sessionId,
+      events: [
+        header(sessionId),
+        message("user", "from custom db"),
+        message("assistant", "custom reply", {
+          provider: "openai",
+          model: "gpt-5.4",
+          usage: { input: 1, output: 2 },
+        }),
+      ],
+    });
+
+    expect(readSessionMessages({ agentId: "ops", sessionId })).toEqual([]);
+    expect(readSessionMessages(scope)).toEqual([
+      expect.objectContaining({ content: "from custom db" }),
+      expect.objectContaining({ content: "custom reply" }),
+    ]);
+    expect(readRecentSessionMessages(scope, { maxMessages: 1 })).toEqual([
+      expect.objectContaining({ content: "custom reply" }),
+    ]);
+    expect(readRecentSessionMessagesWithStats(scope, { maxMessages: 1 })).toMatchObject({
+      totalMessages: 2,
+      messages: [{ __openclaw: { seq: 2 }, content: "custom reply" }],
+    });
+    expect(readSessionMessageCount(scope)).toBe(2);
+    expect(readLatestSessionUsageFromTranscript(scope)).toMatchObject({
+      inputTokens: 1,
+      outputTokens: 2,
     });
   });
 

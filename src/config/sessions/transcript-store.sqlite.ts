@@ -53,6 +53,7 @@ export type LoadSqliteSessionTranscriptTailEventsOptions = SqliteSessionTranscri
 
 export type SqliteSessionTranscriptScope = {
   agentId: string;
+  path?: string;
   sessionId: string;
 };
 
@@ -427,6 +428,7 @@ export function resolveSqliteSessionTranscriptScope(
   if (options.agentId?.trim()) {
     return {
       agentId: normalizeAgentId(options.agentId),
+      path: options.path,
       sessionId,
     };
   }

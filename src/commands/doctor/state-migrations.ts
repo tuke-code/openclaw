@@ -79,6 +79,7 @@ export type LegacyStateDetection = {
     legacyStorePath: string;
     agentLegacyDir: string;
     agentLegacyStorePath: string;
+    agentLegacyStores: LegacyAgentSessionStoreDetection[];
     hasLegacy: boolean;
     legacyKeys: string[];
   };
@@ -102,6 +103,14 @@ type DoctorSessionMigrationSurface = {
     key: string;
     agentId: string;
   }) => string | null | undefined;
+};
+
+type LegacyAgentSessionStoreDetection = {
+  agentId: string;
+  legacyDir: string;
+  legacyStorePath: string;
+  hasLegacyJsonSessionStore: boolean;
+  legacyKeys: string[];
 };
 
 type MigrationSourceReport = {
@@ -1788,6 +1797,44 @@ function listLegacySessionKeys(params: {
   return legacy;
 }
 
+function listLegacySessionMigrationAgentIds(cfg: OpenClawConfig, targetAgentId: string): string[] {
+  return Array.from(new Set([targetAgentId, ...listAgentIds(cfg)].map(normalizeAgentId)));
+}
+
+function detectAgentLegacySessionStores(params: {
+  cfg: OpenClawConfig;
+  includeSessions: boolean;
+  stateDir: string;
+  targetAgentId: string;
+  targetMainKey: string;
+  targetScope?: SessionScope;
+}): LegacyAgentSessionStoreDetection[] {
+  return listLegacySessionMigrationAgentIds(params.cfg, params.targetAgentId).map((agentId) => {
+    const legacyDir = path.join(params.stateDir, "agents", agentId, "sessions");
+    const legacyStorePath = path.join(legacyDir, "sessions.json");
+    const hasLegacyJsonSessionStore = params.includeSessions && fileExists(legacyStorePath);
+    const parsed = hasLegacyJsonSessionStore
+      ? readSessionStoreJson5(legacyStorePath)
+      : { store: {}, ok: true };
+    const legacyKeys =
+      params.includeSessions && parsed.ok
+        ? listLegacySessionKeys({
+            store: parsed.store,
+            agentId,
+            mainKey: params.targetMainKey,
+            scope: params.targetScope,
+          })
+        : [];
+    return {
+      agentId,
+      legacyDir,
+      legacyStorePath,
+      hasLegacyJsonSessionStore,
+      legacyKeys,
+    };
+  });
+}
+
 function emptyDirOrMissing(dir: string): boolean {
   if (!existsDir(dir)) {
     return true;
@@ -1838,18 +1885,23 @@ function collectLegacyMigrationSources(detected: LegacyStateDetection): Migratio
         : undefined,
     }),
   );
-  add(
-    statFileSource({
-      kind: "session-index",
-      sourcePath: detected.sessions.agentLegacyStorePath,
-      targetTable: "agent.session_entries",
-      recordCount: fileExists(detected.sessions.agentLegacyStorePath)
-        ? countSessionStoreRecords(detected.sessions.agentLegacyStorePath)
-        : undefined,
-    }),
-  );
+  for (const agentStore of detected.sessions.agentLegacyStores) {
+    add(
+      statFileSource({
+        kind: "session-index",
+        sourcePath: agentStore.legacyStorePath,
+        targetTable: "agent.session_entries",
+        recordCount: fileExists(agentStore.legacyStorePath)
+          ? countSessionStoreRecords(agentStore.legacyStorePath)
+          : undefined,
+      }),
+    );
+  }
 
-  for (const dir of [detected.sessions.legacyDir, detected.sessions.agentLegacyDir]) {
+  for (const dir of [
+    detected.sessions.legacyDir,
+    ...detected.sessions.agentLegacyStores.map((store) => store.legacyDir),
+  ]) {
     for (const entry of safeReadDir(dir)) {
       if (!entry.isFile() || !entry.name.endsWith(".jsonl")) {
         continue;
@@ -2186,27 +2238,31 @@ export async function detectLegacyStateMigrations(params: {
 
   const sessionsLegacyDir = path.join(stateDir, "sessions");
   const sessionsLegacyStorePath = path.join(sessionsLegacyDir, "sessions.json");
-  const sessionsAgentLegacyDir = path.join(stateDir, "agents", targetAgentId, "sessions");
-  const sessionsAgentLegacyStorePath = path.join(sessionsAgentLegacyDir, "sessions.json");
-  const hasAgentLegacyJsonSessionStore =
-    includeSessions && fileExists(sessionsAgentLegacyStorePath);
   const legacySessionEntries = includeSessions ? safeReadDir(sessionsLegacyDir) : [];
   const hasLegacySessions =
     (includeSessions && fileExists(sessionsLegacyStorePath)) ||
     legacySessionEntries.some((e) => e.isFile() && e.name.endsWith(".jsonl"));
-
-  const targetSessionParsed = hasAgentLegacyJsonSessionStore
-    ? readSessionStoreJson5(sessionsAgentLegacyStorePath)
-    : { store: {}, ok: true };
-  const legacyKeys =
-    includeSessions && targetSessionParsed.ok
-      ? listLegacySessionKeys({
-          store: targetSessionParsed.store,
-          agentId: targetAgentId,
-          mainKey: targetMainKey,
-          scope: targetScope,
-        })
-      : [];
+  const agentLegacyStores = detectAgentLegacySessionStores({
+    cfg: params.cfg,
+    includeSessions,
+    stateDir,
+    targetAgentId,
+    targetMainKey,
+    targetScope,
+  });
+  const targetAgentLegacyStore =
+    agentLegacyStores.find((store) => store.agentId === targetAgentId) ?? agentLegacyStores[0];
+  const sessionsAgentLegacyDir =
+    targetAgentLegacyStore?.legacyDir ?? path.join(stateDir, "agents", targetAgentId, "sessions");
+  const sessionsAgentLegacyStorePath =
+    targetAgentLegacyStore?.legacyStorePath ?? path.join(sessionsAgentLegacyDir, "sessions.json");
+  const legacyKeys = agentLegacyStores.flatMap((store) => store.legacyKeys);
+  const hasAgentLegacyJsonSessionStore = agentLegacyStores.some(
+    (store) => store.hasLegacyJsonSessionStore,
+  );
+  const hasAgentLegacyJsonlSessions = agentLegacyStores.some((store) =>
+    safeReadDir(store.legacyDir).some((entry) => entry.isFile() && entry.name.endsWith(".jsonl")),
+  );
 
   const legacyAgentDir = path.join(stateDir, "agent");
   const targetAgentDir = path.join(stateDir, "agents", targetAgentId, "agent");
@@ -2225,10 +2281,14 @@ export async function detectLegacyStateMigrations(params: {
     preview.push(`- Sessions: import ${sessionsLegacyDir} into SQLite`);
   }
   if (legacyKeys.length > 0) {
-    preview.push(`- Sessions: canonicalize legacy keys in ${sessionsAgentLegacyStorePath}`);
+    for (const store of agentLegacyStores.filter((store) => store.legacyKeys.length > 0)) {
+      preview.push(`- Sessions: canonicalize legacy keys in ${store.legacyStorePath}`);
+    }
   }
   if (hasAgentLegacyJsonSessionStore) {
-    preview.push(`- Sessions: import ${sessionsAgentLegacyStorePath} into SQLite`);
+    for (const store of agentLegacyStores.filter((store) => store.hasLegacyJsonSessionStore)) {
+      preview.push(`- Sessions: import ${store.legacyStorePath} into SQLite`);
+    }
   }
   if (hasLegacyAgentDir) {
     preview.push(`- Agent dir: ${legacyAgentDir} → ${targetAgentDir}`);
@@ -2250,7 +2310,12 @@ export async function detectLegacyStateMigrations(params: {
       legacyStorePath: sessionsLegacyStorePath,
       agentLegacyDir: sessionsAgentLegacyDir,
       agentLegacyStorePath: sessionsAgentLegacyStorePath,
-      hasLegacy: hasLegacySessions || legacyKeys.length > 0 || hasAgentLegacyJsonSessionStore,
+      agentLegacyStores,
+      hasLegacy:
+        hasLegacySessions ||
+        legacyKeys.length > 0 ||
+        hasAgentLegacyJsonSessionStore ||
+        hasAgentLegacyJsonlSessions,
       legacyKeys,
     },
     agentDir: {
@@ -2278,19 +2343,7 @@ async function migrateLegacySessions(
   const legacyParsed = fileExists(detected.sessions.legacyStorePath)
     ? readSessionStoreJson5(detected.sessions.legacyStorePath)
     : { store: {}, ok: true };
-  const agentLegacyParsed = fileExists(detected.sessions.agentLegacyStorePath)
-    ? readSessionStoreJson5(detected.sessions.agentLegacyStorePath)
-    : { store: {}, ok: true };
-  const hasAgentLegacySessionStoreFile = fileExists(detected.sessions.agentLegacyStorePath);
   const legacyStore = legacyParsed.store;
-  const agentLegacyStore = agentLegacyParsed.store;
-
-  const canonicalizedAgentLegacy = canonicalizeSessionStore({
-    store: agentLegacyStore,
-    agentId: detected.targetAgentId,
-    mainKey: detected.targetMainKey,
-    scope: detected.targetScope,
-  });
   const canonicalizedLegacy = canonicalizeSessionStore({
     store: legacyStore,
     agentId: detected.targetAgentId,
@@ -2298,39 +2351,71 @@ async function migrateLegacySessions(
     scope: detected.targetScope,
   });
 
-  const merged: Record<string, SessionEntryLike> = { ...canonicalizedAgentLegacy.store };
-  for (const [key, entry] of Object.entries(canonicalizedLegacy.store)) {
-    merged[key] = mergeSessionEntry({
-      existing: merged[key],
-      incoming: entry,
-      preferIncomingOnTie: false,
-    });
-  }
-
-  const mainKey = buildAgentMainSessionKey({
-    agentId: detected.targetAgentId,
-    mainKey: detected.targetMainKey,
-  });
-  if (!merged[mainKey]) {
-    const latest = pickLatestLegacyDirectEntry(legacyStore);
-    if (latest?.sessionId) {
-      merged[mainKey] = latest;
-      changes.push(`Migrated latest direct-chat session → ${mainKey}`);
-    }
-  }
-
   if (!legacyParsed.ok) {
     warnings.push(
       `Legacy sessions store unreadable; left in place at ${detected.sessions.legacyStorePath}`,
     );
   }
 
-  if (
-    (legacyParsed.ok || agentLegacyParsed.ok) &&
-    (Object.keys(legacyStore).length > 0 ||
+  for (const agentStore of detected.sessions.agentLegacyStores) {
+    const agentLegacyParsed = fileExists(agentStore.legacyStorePath)
+      ? readSessionStoreJson5(agentStore.legacyStorePath)
+      : { store: {}, ok: true };
+    const agentLegacyStore = agentLegacyParsed.store;
+    const canonicalizedAgentLegacy = canonicalizeSessionStore({
+      store: agentLegacyStore,
+      agentId: agentStore.agentId,
+      mainKey: detected.targetMainKey,
+      scope: detected.targetScope,
+    });
+    const merged: Record<string, SessionEntryLike> = { ...canonicalizedAgentLegacy.store };
+    if (agentStore.agentId === detected.targetAgentId) {
+      for (const [key, entry] of Object.entries(canonicalizedLegacy.store)) {
+        merged[key] = mergeSessionEntry({
+          existing: merged[key],
+          incoming: entry,
+          preferIncomingOnTie: false,
+        });
+      }
+
+      const mainKey = buildAgentMainSessionKey({
+        agentId: detected.targetAgentId,
+        mainKey: detected.targetMainKey,
+      });
+      if (!merged[mainKey]) {
+        const latest = pickLatestLegacyDirectEntry(legacyStore);
+        if (latest?.sessionId) {
+          merged[mainKey] = latest;
+          changes.push(`Migrated latest direct-chat session → ${mainKey}`);
+        }
+      }
+    }
+
+    if (!agentLegacyParsed.ok) {
+      warnings.push(
+        `Legacy sessions store unreadable; left in place at ${agentStore.legacyStorePath}`,
+      );
+    }
+
+    const hasRootLegacyForTarget =
+      agentStore.agentId === detected.targetAgentId && Object.keys(legacyStore).length > 0;
+    const hasAgentLegacyRows =
       Object.keys(agentLegacyStore).length > 0 ||
-      (hasAgentLegacySessionStoreFile && agentLegacyParsed.ok))
-  ) {
+      (agentStore.hasLegacyJsonSessionStore && agentLegacyParsed.ok);
+    if (!hasRootLegacyForTarget && !hasAgentLegacyRows) {
+      continue;
+    }
+    if (
+      agentStore.agentId === detected.targetAgentId &&
+      !legacyParsed.ok &&
+      !agentLegacyParsed.ok
+    ) {
+      continue;
+    }
+    if (agentStore.agentId !== detected.targetAgentId && !agentLegacyParsed.ok) {
+      continue;
+    }
+
     const normalized: Record<string, SessionEntry> = {};
     for (const [key, entry] of Object.entries(merged)) {
       const normalizedEntry = normalizeSessionEntry(entry);
@@ -2341,17 +2426,17 @@ async function migrateLegacySessions(
     }
     const imported = mergeSqliteSessionEntries(
       {
-        agentId: detected.targetAgentId,
+        agentId: agentStore.agentId,
         env: detected.env,
       },
       normalized,
     );
     changes.push(
-      `Imported ${imported.imported} session index row(s) into SQLite for agent ${detected.targetAgentId}`,
+      `Imported ${imported.imported} session index row(s) into SQLite for agent ${agentStore.agentId}`,
     );
-    if (agentLegacyParsed.ok && fileExists(detected.sessions.agentLegacyStorePath)) {
+    if (agentLegacyParsed.ok && fileExists(agentStore.legacyStorePath)) {
       try {
-        fs.rmSync(detected.sessions.agentLegacyStorePath, { force: true });
+        fs.rmSync(agentStore.legacyStorePath, { force: true });
       } catch {
         // ignore
       }
@@ -2390,24 +2475,26 @@ async function migrateLegacySessions(
     }
   }
 
-  const agentLegacyEntries = safeReadDir(detected.sessions.agentLegacyDir);
-  for (const entry of agentLegacyEntries) {
-    if (!entry.isFile() || !entry.name.endsWith(".jsonl")) {
-      continue;
-    }
-    const transcriptPath = path.join(detected.sessions.agentLegacyDir, entry.name);
-    try {
-      const imported = importLegacyTranscriptFileToSqlite({
-        sourcePath: transcriptPath,
-        agentId: detected.targetAgentId,
-        env: detected.env,
-      });
-      fs.rmSync(transcriptPath, { force: true });
-      changes.push(
-        `Imported canonical ${entry.name} transcript (${imported.imported} event(s)) into SQLite for agent ${detected.targetAgentId}`,
-      );
-    } catch (err) {
-      warnings.push(`Failed importing transcript ${transcriptPath}: ${String(err)}`);
+  for (const agentStore of detected.sessions.agentLegacyStores) {
+    const agentLegacyEntries = safeReadDir(agentStore.legacyDir);
+    for (const entry of agentLegacyEntries) {
+      if (!entry.isFile() || !entry.name.endsWith(".jsonl")) {
+        continue;
+      }
+      const transcriptPath = path.join(agentStore.legacyDir, entry.name);
+      try {
+        const imported = importLegacyTranscriptFileToSqlite({
+          sourcePath: transcriptPath,
+          agentId: agentStore.agentId,
+          env: detected.env,
+        });
+        fs.rmSync(transcriptPath, { force: true });
+        changes.push(
+          `Imported canonical ${entry.name} transcript (${imported.imported} event(s)) into SQLite for agent ${agentStore.agentId}`,
+        );
+      } catch (err) {
+        warnings.push(`Failed importing transcript ${transcriptPath}: ${String(err)}`);
+      }
     }
   }
 
@@ -2422,6 +2509,9 @@ async function migrateLegacySessions(
   }
 
   removeDirIfEmpty(detected.sessions.legacyDir);
+  for (const agentStore of detected.sessions.agentLegacyStores) {
+    removeDirIfEmpty(agentStore.legacyDir);
+  }
   const legacyLeft = safeReadDir(detected.sessions.legacyDir).filter((e) => e.isFile());
   if (legacyLeft.length > 0) {
     warnings.push(
@@ -2429,6 +2519,16 @@ async function migrateLegacySessions(
         .map((entry) => entry.name)
         .join(", ")}`,
     );
+  }
+  for (const agentStore of detected.sessions.agentLegacyStores) {
+    const agentLegacyLeft = safeReadDir(agentStore.legacyDir).filter((e) => e.isFile());
+    if (agentLegacyLeft.length > 0) {
+      warnings.push(
+        `Left legacy sessions in place at ${agentStore.legacyDir}: ${agentLegacyLeft
+          .map((entry) => entry.name)
+          .join(", ")}`,
+      );
+    }
   }
 
   return { changes, warnings };

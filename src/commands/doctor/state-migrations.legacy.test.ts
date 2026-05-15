@@ -327,4 +327,84 @@ describe("state migrations", () => {
     await expectMissingPath(resolveLegacyChannelAllowFromPath("chatapp", env, "default"));
     await expectMissingPath(resolveLegacyChannelAllowFromPath("chatapp", env, "beta"));
   });
+
+  it("migrates legacy sessions for every configured agent", async () => {
+    const root = await createTempDir();
+    const stateDir = path.join(root, ".openclaw");
+    const env = createEnv(stateDir);
+    const cfg = {
+      ...createConfig(),
+      agents: {
+        list: [{ id: "worker-1", default: true }, { id: "reviewer" }],
+      },
+    } as OpenClawConfig;
+
+    await fs.mkdir(path.join(stateDir, "agents", "reviewer", "sessions"), { recursive: true });
+    await fs.writeFile(
+      path.join(stateDir, "agents", "reviewer", "sessions", "sessions.json"),
+      `${JSON.stringify(
+        {
+          "group:mobile-reviewer": { sessionId: "reviewer-group", updatedAt: 9 },
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+    await fs.writeFile(
+      path.join(stateDir, "agents", "reviewer", "sessions", "reviewer-trace.jsonl"),
+      [
+        JSON.stringify({
+          type: "session",
+          id: "reviewer-trace",
+          timestamp: "2026-05-06T00:00:00.000Z",
+        }),
+        JSON.stringify({
+          type: "message",
+          timestamp: "2026-05-06T00:00:01.000Z",
+          message: { role: "user", content: "review me", timestamp: 1 },
+        }),
+      ].join("\n") + "\n",
+      "utf8",
+    );
+
+    const detected = await detectLegacyStateMigrations({
+      cfg,
+      env,
+      homedir: () => root,
+    });
+    expect(detected.sessions.hasLegacy).toBe(true);
+    expect(detected.preview).toContain(
+      `- Sessions: import ${path.join(stateDir, "agents", "reviewer", "sessions", "sessions.json")} into SQLite`,
+    );
+
+    const result = await runLegacyStateMigrations({
+      detected,
+      now: () => 1234,
+    });
+
+    expect(result.warnings).toStrictEqual([]);
+    expect(result.changes).toEqual([
+      "Imported 1 session index row(s) into SQLite for agent reviewer",
+      "Canonicalized 1 legacy session key(s)",
+      "Imported canonical reviewer-trace.jsonl transcript (2 event(s)) into SQLite for agent reviewer",
+    ]);
+    const reviewerStore = loadSqliteSessionEntries({
+      agentId: "reviewer",
+      env,
+    }) as Record<string, { sessionId: string }>;
+    expect(reviewerStore["agent:reviewer:mobileauth:group:mobile-reviewer"]?.sessionId).toBe(
+      "reviewer-group",
+    );
+    const importedTranscriptEvents = loadSqliteSessionTranscriptEvents({
+      agentId: "reviewer",
+      sessionId: "reviewer-trace",
+      env,
+    });
+    expect(importedTranscriptEvents).toHaveLength(2);
+    await expectMissingPath(path.join(stateDir, "agents", "reviewer", "sessions", "sessions.json"));
+    await expectMissingPath(
+      path.join(stateDir, "agents", "reviewer", "sessions", "reviewer-trace.jsonl"),
+    );
+  });
 });
