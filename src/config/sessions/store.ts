@@ -128,6 +128,7 @@ export async function patchSessionEntry(
     const applied = applySqliteSessionEntriesPatch({
       agentId: options.agentId,
       env: options.env,
+      path: options.path,
       upsertEntries: { [options.sessionKey]: next },
       expectedEntries: new Map([[options.sessionKey, expected]]),
     });

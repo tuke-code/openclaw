@@ -734,6 +734,42 @@ describe("SQLite session row backend", () => {
     });
   });
 
+  it("patches session entries in an explicit SQLite database path", async () => {
+    const stateDir = createTempDir();
+    const defaultEnv = { OPENCLAW_STATE_DIR: stateDir };
+    const databasePath = path.join(createTempDir(), "relocated", "openclaw-agent.sqlite");
+
+    upsertSessionEntry({
+      agentId: "ops",
+      env: defaultEnv,
+      path: databasePath,
+      sessionKey: "discord:ops",
+      entry: {
+        sessionId: "ops-session",
+        updatedAt: 100,
+      },
+    });
+
+    const updated = await patchSessionEntry({
+      agentId: "ops",
+      env: defaultEnv,
+      path: databasePath,
+      sessionKey: "discord:ops",
+      update: () => ({ modelOverride: "gpt-5.5", updatedAt: 200 }),
+    });
+
+    expect(updated?.modelOverride).toBe("gpt-5.5");
+    expect(loadSqliteSessionEntries({ agentId: "ops", env: defaultEnv })).toEqual({});
+    expect(
+      loadSqliteSessionEntries({ agentId: "ops", env: defaultEnv, path: databasePath }),
+    ).toEqual({
+      "discord:ops": expect.objectContaining({
+        sessionId: "ops-session",
+        modelOverride: "gpt-5.5",
+      }),
+    });
+  });
+
   it("exposes row-level session entry APIs by agent id", () => {
     const stateDir = createTempDir();
     const env = { OPENCLAW_STATE_DIR: stateDir };
