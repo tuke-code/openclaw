@@ -72,6 +72,7 @@ const AGENT_MEDIATED_COMPLETION_TOOLS = new Set([
 ]);
 
 type SubagentAnnounceDeliveryDeps = {
+  callGateway: typeof callGateway;
   dispatchGatewayMethodInProcess: typeof dispatchGatewayMethodInProcess;
   getRuntimeConfig: typeof getRuntimeConfig;
   getRequesterSessionActivity: (requesterSessionKey: string) => {
@@ -87,6 +88,7 @@ type SubagentAnnounceDeliveryDeps = {
 };
 
 const defaultSubagentAnnounceDeliveryDeps: SubagentAnnounceDeliveryDeps = {
+  callGateway,
   dispatchGatewayMethodInProcess,
   getRuntimeConfig,
   getRequesterSessionActivity: (requesterSessionKey: string) => {
@@ -114,21 +116,6 @@ async function resolveQueueEmbeddedPiMessageOutcome(
     sessionId,
     text,
     options,
-  );
-}
-
-async function runAnnounceAgentCall(params: {
-  agentParams: Record<string, unknown>;
-  expectFinal?: boolean;
-  timeoutMs?: number;
-}): Promise<unknown> {
-  return await subagentAnnounceDeliveryDeps.dispatchGatewayMethodInProcess(
-    "agent",
-    params.agentParams,
-    {
-      expectFinal: params.expectFinal,
-      timeoutMs: params.timeoutMs,
-    },
   );
 }
 
