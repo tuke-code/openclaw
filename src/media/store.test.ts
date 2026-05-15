@@ -1,3 +1,4 @@
+import { EventEmitter } from "node:events";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { Readable } from "node:stream";
@@ -550,7 +551,7 @@ describe("media store", () => {
         );
         return {
           removedFiles: [oldNested.path, oldFlat.path],
-          preservedFiles: [],
+          preservedFiles: [freshNested.path],
           preservedMediaRefs: [
             {
               id: freshNested.id,
@@ -690,6 +691,51 @@ describe("media store", () => {
         expect(saved.path).toContain(`${path.sep}media${path.sep}`);
       } finally {
         vi.doUnmock("./mime.js");
+      }
+    });
+  });
+
+  it("rejects HTTP media downloads when the response stream errors", async () => {
+    await withTempStore(async (store) => {
+      const response = new Readable({ read() {} }) as Readable & {
+        statusCode: number;
+        headers: Record<string, string>;
+      };
+      response.statusCode = 200;
+      response.headers = { "content-type": "text/plain" };
+      const request = new EventEmitter() as EventEmitter & {
+        end: () => void;
+        destroy: (error?: Error) => void;
+      };
+      request.end = vi.fn();
+      request.destroy = vi.fn((error?: Error) => {
+        if (error) {
+          request.emit("error", error);
+        }
+      });
+      const httpRequest = vi.fn((_url: URL, _options: unknown, onResponse: unknown) => {
+        queueMicrotask(() => {
+          (onResponse as (res: typeof response) => void)(response);
+          response.emit("data", Buffer.from("partial"));
+          response.emit("error", new Error("socket reset"));
+        });
+        return request;
+      });
+      type NetworkDeps = NonNullable<Parameters<typeof store.setMediaStoreNetworkDepsForTest>[0]>;
+      store.setMediaStoreNetworkDepsForTest({
+        httpRequest: httpRequest as unknown as NetworkDeps["httpRequest"],
+        resolvePinnedHostname: (async () => ({
+          hostname: "example.test",
+          addresses: ["93.184.216.34"],
+          lookup: vi.fn(),
+        })) as unknown as NetworkDeps["resolvePinnedHostname"],
+      });
+      try {
+        await expect(store.saveMediaSource("http://example.test/media.txt")).rejects.toThrow(
+          "socket reset",
+        );
+      } finally {
+        store.setMediaStoreNetworkDepsForTest();
       }
     });
   });

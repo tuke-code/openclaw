@@ -57,6 +57,7 @@ export type LegacyMediaImportResult = {
   removed: number;
   skipped: number;
 };
+type ExpiredMediaBlobRow = Pick<MediaBlobRow, "id" | "subdir">;
 
 const defaultHttpRequestImpl: RequestImpl = httpRequest;
 const defaultHttpsRequestImpl: RequestImpl = httpsRequest;
@@ -358,19 +359,38 @@ async function retryAfterRecreatingDir<T>(dir: string, run: () => Promise<T>): P
 
 export async function cleanOldMedia(ttlMs = DEFAULT_TTL_MS, options: CleanOldMediaOptions = {}) {
   const cutoff = Date.now() - ttlMs;
-  runOpenClawStateWriteTransaction((database) => {
-    const query = getMediaKysely(database.db)
-      .deleteFrom("media_blobs")
+  const expiredRows = runOpenClawStateWriteTransaction((database) => {
+    const baseQuery = getMediaKysely(database.db)
+      .selectFrom("media_blobs")
+      .select(["id", "subdir"])
       .where("created_at", "<", cutoff);
-    executeSqliteQuerySync(
-      database.db,
-      options.recursive === false ? query.where("subdir", "not like", `%${path.sep}%`) : query,
-    );
+    const query =
+      options.recursive === false
+        ? baseQuery.where("subdir", "not like", `%${path.sep}%`)
+        : baseQuery;
+    const rows = executeSqliteQuerySync(database.db, query).rows as ExpiredMediaBlobRow[];
+    for (const row of rows) {
+      executeSqliteQuerySync(
+        database.db,
+        getMediaKysely(database.db)
+          .deleteFrom("media_blobs")
+          .where("subdir", "=", row.subdir)
+          .where("id", "=", row.id),
+      );
+    }
+    return rows;
   });
+  const materializationRoot = resolveMediaMaterializationRoot();
+  const removedDirs = new Set<string>();
+  for (const row of expiredRows) {
+    const filePath = path.join(resolveMediaScopedDir(row.subdir, "cleanOldMedia"), row.id);
+    await fs.rm(filePath, { force: true }).catch(() => {});
+    removedDirs.add(path.dirname(filePath));
+  }
   if (options.pruneEmptyDirs || options.recursive !== false) {
-    await fs
-      .rm(resolveMediaMaterializationRoot(), { recursive: true, force: true })
-      .catch(() => {});
+    for (const dir of removedDirs) {
+      await pruneEmptyMediaDirs(dir, materializationRoot);
+    }
   }
 }
 
@@ -460,6 +480,7 @@ async function downloadToBuffer(
               reject(err);
             }
           });
+          res.on("error", reject);
         });
         req.on("error", reject);
         req.end();
