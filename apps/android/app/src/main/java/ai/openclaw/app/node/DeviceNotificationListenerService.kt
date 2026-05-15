@@ -294,7 +294,8 @@ class DeviceNotificationListenerService : NotificationListenerService() {
     }
 
     private fun recentPackagesPrefs(context: Context) =
-      context.applicationContext.getSharedPreferences("openclaw.secure", Context.MODE_PRIVATE)
+      context.applicationContext
+        .getSharedPreferences("openclaw.secure", Context.MODE_PRIVATE)
 
     private fun migrateLegacyRecentPackagesIfNeeded(
       context: Context,
@@ -315,7 +316,8 @@ class DeviceNotificationListenerService : NotificationListenerService() {
         stateStore.replaceRecentNotificationPackages(packages, recentPackagesLimit)
       }
       if (prefs.contains(recentPackagesPref) || prefs.contains(legacyRecentPackagesPref)) {
-        prefs.edit()
+        prefs
+          .edit()
           .remove(recentPackagesPref)
           .remove(legacyRecentPackagesPref)
           .apply()

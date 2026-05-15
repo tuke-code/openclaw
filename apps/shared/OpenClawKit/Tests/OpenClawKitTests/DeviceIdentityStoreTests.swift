@@ -112,23 +112,11 @@ struct DeviceIdentityStoreTests {
     func migratesLegacyDeviceAuthSidecarIntoSQLite() throws {
         try Self.withTempStateDir { stateDir in
             let legacyURL = Self.legacyAuthURL(stateDir: stateDir)
-            try FileManager.default.createDirectory(
-                at: legacyURL.deletingLastPathComponent(),
-                withIntermediateDirectories: true)
-            let legacy = [
-                "version": 1,
-                "deviceId": "device-1",
-                "tokens": [
-                    "gateway": [
-                        "token": "token-1",
-                        "role": "gateway",
-                        "scopes": ["write", " read ", "write"],
-                        "updatedAtMs": 1_700_000_000_000,
-                    ],
-                ],
-            ] as [String: Any]
-            let data = try JSONSerialization.data(withJSONObject: legacy, options: [.prettyPrinted, .sortedKeys])
-            try data.write(to: legacyURL)
+            try Self.writeLegacyAuthSidecar(
+                legacyURL,
+                deviceId: "device-1",
+                token: "token-1",
+                scopes: ["write", " read ", "write"])
 
             let entry = try #require(DeviceAuthStore.loadToken(deviceId: "device-1", role: "gateway"))
 
@@ -148,27 +136,38 @@ struct DeviceIdentityStoreTests {
     func keepsLegacyDeviceAuthSidecarWhenSQLiteImportFails() throws {
         try Self.withTempStateDir { stateDir in
             let legacyURL = Self.legacyAuthURL(stateDir: stateDir)
-            try FileManager.default.createDirectory(
-                at: legacyURL.deletingLastPathComponent(),
-                withIntermediateDirectories: true)
-            let legacy = [
-                "version": 1,
-                "deviceId": "device-1",
-                "tokens": [
-                    "gateway": [
-                        "token": "token-1",
-                        "role": "gateway",
-                        "scopes": ["read"],
-                        "updatedAtMs": 1_700_000_000_000,
-                    ],
-                ],
-            ] as [String: Any]
-            let data = try JSONSerialization.data(withJSONObject: legacy, options: [.prettyPrinted, .sortedKeys])
-            try data.write(to: legacyURL)
+            try Self.writeLegacyAuthSidecar(
+                legacyURL,
+                deviceId: "device-1",
+                token: "token-1",
+                scopes: ["read"])
             try FileManager.default.createDirectory(at: Self.databaseURL(stateDir: stateDir), withIntermediateDirectories: true)
 
             #expect(DeviceAuthStore.loadToken(deviceId: "device-1", role: "gateway") == nil)
             #expect(FileManager.default.fileExists(atPath: legacyURL.path))
+        }
+    }
+
+    @Test("drops stale legacy device auth sidecar when storing a different device")
+    func dropsStaleLegacyDeviceAuthSidecarWhenReplacingDevice() throws {
+        try Self.withTempStateDir { stateDir in
+            let legacyURL = Self.legacyAuthURL(stateDir: stateDir)
+            try Self.writeLegacyAuthSidecar(
+                legacyURL,
+                deviceId: "device-1",
+                token: "stale-token",
+                scopes: ["read"])
+
+            let entry = DeviceAuthStore.storeToken(
+                deviceId: "device-2",
+                role: "gateway",
+                token: "fresh-token",
+                scopes: ["write"])
+
+            #expect(entry.token == "fresh-token")
+            #expect(DeviceAuthStore.loadToken(deviceId: "device-1", role: "gateway") == nil)
+            #expect(DeviceAuthStore.loadToken(deviceId: "device-2", role: "gateway")?.token == "fresh-token")
+            #expect(!FileManager.default.fileExists(atPath: legacyURL.path))
         }
     }
 
@@ -201,6 +200,31 @@ struct DeviceIdentityStoreTests {
         stateDir
             .appendingPathComponent("identity", isDirectory: true)
             .appendingPathComponent("device-auth.json", isDirectory: false)
+    }
+
+    private static func writeLegacyAuthSidecar(
+        _ legacyURL: URL,
+        deviceId: String,
+        token: String,
+        scopes: [String]) throws
+    {
+        try FileManager.default.createDirectory(
+            at: legacyURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true)
+        let legacy = [
+            "version": 1,
+            "deviceId": deviceId,
+            "tokens": [
+                "gateway": [
+                    "token": token,
+                    "role": "gateway",
+                    "scopes": scopes,
+                    "updatedAtMs": 1_700_000_000_000,
+                ],
+            ],
+        ] as [String: Any]
+        let data = try JSONSerialization.data(withJSONObject: legacy, options: [.prettyPrinted, .sortedKeys])
+        try data.write(to: legacyURL)
     }
 
     private static func base64UrlDecode(_ value: String) -> Data? {

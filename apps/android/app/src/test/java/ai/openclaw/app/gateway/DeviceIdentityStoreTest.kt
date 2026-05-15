@@ -162,6 +162,8 @@ class DeviceIdentityStoreTest {
 
   private fun privateKeyMarker(boundary: String): String = "-----$boundary ${"PRIVATE" + " KEY"}-----"
 
-  private fun pemBlock(label: String, body: String): String =
-    "-----BEGIN $label-----\n$body\n-----END $label-----"
+  private fun pemBlock(
+    label: String,
+    body: String,
+  ) = "-----BEGIN $label-----\n$body\n-----END $label-----"
 }

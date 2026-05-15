@@ -83,6 +83,25 @@ class DeviceAuthStoreTest {
     )
   }
 
+  @Test
+  fun saveTokenForDifferentDevicePurgesStaleLegacySecurePrefsTokens() {
+    val app = RuntimeEnvironment.getApplication()
+    val prefs = legacyPrefs(app)
+    prefs.putString("gateway.deviceToken.device-1.operator", " stale-token ")
+    prefs.putString(
+      "gateway.deviceTokenMeta.device-1.operator",
+      """{"scopes":["operator.read"],"updatedAtMs":1700000000000}""",
+    )
+    val store = DeviceAuthStore(app, legacyPrefsOverride = prefs)
+
+    store.saveToken("device-2", "operator", "fresh-token", scopes = listOf("operator.write"))
+
+    assertNull(store.loadEntry("device-1", "operator"))
+    assertNull(prefs.getString("gateway.deviceToken.device-1.operator"))
+    assertNull(prefs.getString("gateway.deviceTokenMeta.device-1.operator"))
+    assertEquals("fresh-token", store.loadEntry("device-2", "operator")?.token)
+  }
+
   private fun legacyPrefs(context: Context): SecurePrefs {
     val prefs = context.getSharedPreferences("openclaw.node.secure.test", Context.MODE_PRIVATE)
     prefs.edit().clear().commit()

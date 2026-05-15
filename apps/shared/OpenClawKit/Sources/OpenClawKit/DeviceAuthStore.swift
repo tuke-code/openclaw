@@ -42,14 +42,20 @@ public enum DeviceAuthStore {
             role: normalizedRole,
             scopes: normalizeScopes(scopes),
             updatedAtMs: Int(Date().timeIntervalSince1970 * 1000))
+        let currentDeviceId = OpenClawSQLiteStateStore.readLatestDeviceAuthDeviceId()
+        let sqliteDeviceChanged = currentDeviceId != nil && currentDeviceId != deviceId
+        let shouldDropLegacyStore =
+            sqliteDeviceChanged || self.readLegacyStore().map { $0.deviceId != deviceId } == true
         do {
-            if let currentDeviceId = OpenClawSQLiteStateStore.readLatestDeviceAuthDeviceId(),
-               currentDeviceId != deviceId
-            {
+            if sqliteDeviceChanged {
                 try OpenClawSQLiteStateStore.deleteAllDeviceAuthTokens()
             }
             try OpenClawSQLiteStateStore.upsertDeviceAuthToken(self.row(deviceId: deviceId, entry: entry))
-            self.removeLegacyToken(deviceId: deviceId, role: normalizedRole)
+            if shouldDropLegacyStore {
+                self.removeLegacyStore()
+            } else {
+                self.removeLegacyToken(deviceId: deviceId, role: normalizedRole)
+            }
         } catch {
             // best-effort only
         }
@@ -155,9 +161,13 @@ public enum DeviceAuthStore {
         guard var store = self.readLegacyStore(), store.deviceId == deviceId else { return }
         store.tokens.removeValue(forKey: role)
         if store.tokens.isEmpty {
-            try? FileManager.default.removeItem(at: self.legacyFileURL())
+            self.removeLegacyStore()
         } else {
             self.writeLegacyStore(store)
         }
+    }
+
+    private static func removeLegacyStore() {
+        try? FileManager.default.removeItem(at: self.legacyFileURL())
     }
 }

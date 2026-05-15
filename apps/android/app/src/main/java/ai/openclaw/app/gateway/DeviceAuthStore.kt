@@ -20,6 +20,9 @@ private data class PersistedDeviceAuthMetadata(
   val updatedAtMs: Long = 0L,
 )
 
+private const val deviceAuthTokenPrefix = "gateway.deviceToken."
+private const val deviceAuthMetadataPrefix = "gateway.deviceTokenMeta."
+
 interface DeviceAuthTokenStore {
   fun loadEntry(
     deviceId: String,
@@ -80,7 +83,13 @@ class DeviceAuthStore(
     val normalizedRole = normalizeRole(role)
     val normalizedScopes = normalizeScopes(scopes)
     val latestDeviceId = stateStore.readLatestDeviceAuthDeviceId()
-    if (latestDeviceId != null && latestDeviceId != normalizedDevice) {
+    val sqliteDeviceChanged = latestDeviceId != null && latestDeviceId != normalizedDevice
+    val shouldDropLegacyAuth =
+      sqliteDeviceChanged ||
+        legacyPrefs.keysWithPrefix(deviceAuthTokenPrefix).any {
+          !it.startsWith(tokenKeyPrefix(normalizedDevice))
+        }
+    if (sqliteDeviceChanged) {
       stateStore.deleteAllDeviceAuthTokens()
     }
     stateStore.upsertDeviceAuthToken(
@@ -92,7 +101,11 @@ class DeviceAuthStore(
         updatedAtMs = System.currentTimeMillis(),
       ),
     )
-    removeLegacyEntry(normalizedDevice, normalizedRole)
+    if (shouldDropLegacyAuth) {
+      removeAllLegacyEntries()
+    } else {
+      removeLegacyEntry(normalizedDevice, normalizedRole)
+    }
   }
 
   override fun clearToken(
@@ -148,15 +161,22 @@ class DeviceAuthStore(
     legacyPrefs.remove(metadataKey(normalizedDevice, normalizedRole))
   }
 
+  private fun removeAllLegacyEntries() {
+    legacyPrefs.removeKeysWithPrefix(deviceAuthTokenPrefix)
+    legacyPrefs.removeKeysWithPrefix(deviceAuthMetadataPrefix)
+  }
+
+  private fun tokenKeyPrefix(normalizedDevice: String): String = "$deviceAuthTokenPrefix$normalizedDevice."
+
   private fun tokenKey(
     normalizedDevice: String,
     normalizedRole: String,
-  ): String = "gateway.deviceToken.$normalizedDevice.$normalizedRole"
+  ): String = "${tokenKeyPrefix(normalizedDevice)}$normalizedRole"
 
   private fun metadataKey(
     normalizedDevice: String,
     normalizedRole: String,
-  ): String = "gateway.deviceTokenMeta.$normalizedDevice.$normalizedRole"
+  ): String = "$deviceAuthMetadataPrefix$normalizedDevice.$normalizedRole"
 
   private fun decodeScopes(raw: String): List<String> =
     runCatching { json.decodeFromString<List<String>>(raw) }
