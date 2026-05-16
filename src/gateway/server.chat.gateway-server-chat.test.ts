@@ -3,10 +3,11 @@ import os from "node:os";
 import path from "node:path";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { WebSocket } from "ws";
-import { getSessionEntry } from "../config/sessions.js";
+import { getSessionEntry, upsertSessionEntry } from "../config/sessions.js";
 import { replaceSqliteSessionTranscriptEvents } from "../config/sessions/transcript-store.sqlite.js";
 import { emitAgentEvent, registerAgentRunContext } from "../infra/agent-events.js";
 import { extractFirstTextBlock } from "../shared/chat-message-content.js";
+import { openOpenClawAgentDatabase } from "../state/openclaw-agent-db.js";
 import { GATEWAY_CLIENT_MODES, GATEWAY_CLIENT_NAMES } from "../utils/message-channel.js";
 import { testing as agentJobTesting } from "./server-methods/agent-job.js";
 import {
@@ -259,6 +260,50 @@ describe("gateway server chat", () => {
     } finally {
       await removeTempDir(dir);
     }
+  });
+
+  test("sessions.send counts messages from selected registered database path", async () => {
+    const stateDir = process.env.OPENCLAW_STATE_DIR;
+    if (!stateDir) {
+      throw new Error("OPENCLAW_STATE_DIR missing in gateway test environment");
+    }
+    const databasePath = path.join(stateDir, "relocated", "send.sqlite");
+    openOpenClawAgentDatabase({ agentId: "main", path: databasePath });
+    upsertSessionEntry({
+      agentId: "main",
+      path: databasePath,
+      sessionKey: "agent:main:dashboard:registered-send",
+      entry: {
+        sessionId: "sess-registered-send",
+        updatedAt: Date.now(),
+      },
+    });
+    replaceSqliteSessionTranscriptEvents({
+      agentId: "main",
+      path: databasePath,
+      sessionId: "sess-registered-send",
+      events: [
+        { type: "session", version: 1, id: "sess-registered-send" },
+        {
+          type: "message",
+          id: "msg-1",
+          message: { role: "user", content: "first" },
+        },
+        {
+          type: "message",
+          id: "msg-2",
+          message: { role: "assistant", content: "second" },
+        },
+      ],
+    });
+
+    const res = await rpcReq(ws, "sessions.send", {
+      key: "agent:main:dashboard:registered-send",
+      message: "hello relocated",
+      idempotencyKey: "idem-sessions-send-registered-db",
+    });
+    expect(res.ok).toBe(true);
+    expect(res.payload?.messageSeq).toBe(3);
   });
 
   test("sessions.send creates a configured agent main session before sending", async () => {

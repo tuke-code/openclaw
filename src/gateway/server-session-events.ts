@@ -14,6 +14,7 @@ import {
   loadGatewaySessionRow,
   loadSessionEntry,
   readSessionMessageCountAsync,
+  resolveGatewaySessionDatabaseTarget,
   type GatewaySessionRow,
 } from "./session-utils.js";
 
@@ -126,12 +127,17 @@ async function handleTranscriptUpdateBroadcast(
   if (connIds.size === 0) {
     return;
   }
-  const { entry } = loadSessionEntry(sessionKey);
+  const { cfg, entry } = loadSessionEntry(sessionKey);
   const agentId = resolveAgentIdFromSessionKey(sessionKey);
+  const databasePath = resolveGatewaySessionDatabaseTarget({ cfg, key: sessionKey }).databasePath;
   const messageSeq =
     asPositiveSafeInteger(update.messageSeq) ??
     (entry?.sessionId && agentId
-      ? await readSessionMessageCountAsync({ agentId, sessionId: entry.sessionId })
+      ? await readSessionMessageCountAsync({
+          agentId,
+          path: databasePath,
+          sessionId: entry.sessionId,
+        })
       : undefined);
   const sessionSnapshot = buildGatewaySessionSnapshot({
     sessionRow: loadGatewaySessionRow(sessionKey, { transcriptUsageMaxBytes: 64 * 1024 }),

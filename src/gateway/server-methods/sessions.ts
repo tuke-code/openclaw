@@ -477,7 +477,7 @@ async function createAgentMainSessionForSend(params: {
   canonicalKey: string;
   context: GatewayRequestContext;
 }): Promise<
-  | { ok: true; canonicalKey: string; entry: SessionEntry }
+  | { ok: true; agentId: string; databasePath: string; canonicalKey: string; entry: SessionEntry }
   | { ok: false; error: ReturnType<typeof errorShape> }
 > {
   const target = resolveGatewaySessionDatabaseTarget({
@@ -515,7 +515,13 @@ async function createAgentMainSessionForSend(params: {
       ),
     };
   }
-  return { ok: true, canonicalKey: target.canonicalKey, entry: patched.entry };
+  return {
+    ok: true,
+    agentId: target.agentId,
+    databasePath: target.databasePath,
+    canonicalKey: target.canonicalKey,
+    entry: patched.entry,
+  };
 }
 
 function resolveAbortSessionKey(params: {
@@ -721,6 +727,8 @@ async function handleSessionSend(params: {
   const cfg = loadedSession.cfg;
   let entry = loadedSession.entry;
   let canonicalKey = loadedSession.canonicalKey;
+  let agentId = loadedSession.agentId;
+  let databasePath = resolveGatewaySessionDatabaseTarget({ cfg, key: canonicalKey }).databasePath;
   // Reject sends/steers targeting sessions whose owning agent was deleted (#65524).
   const deletedAgentId = resolveDeletedAgentIdFromSessionKey(cfg, canonicalKey);
   if (deletedAgentId !== null) {
@@ -746,6 +754,8 @@ async function handleSessionSend(params: {
     }
     entry = created.entry;
     canonicalKey = created.canonicalKey;
+    agentId = created.agentId;
+    databasePath = created.databasePath;
   }
   if (!entry?.sessionId) {
     params.respond(
@@ -776,7 +786,8 @@ async function handleSessionSend(params: {
 
   const messageSeq =
     (await readSessionMessageCountAsync({
-      agentId: resolveAgentIdFromSessionKey(canonicalKey),
+      agentId,
+      path: databasePath,
       sessionId: entry.sessionId,
     })) + 1;
   let sendAcked = false;
