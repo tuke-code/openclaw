@@ -95,7 +95,7 @@ async function applyPlan(stateDir: string, label: string) {
 }
 
 describe("Matrix legacy state migrations", () => {
-  it("imports sync store files into SQLite plugin state", async () => {
+  it("imports sync store files into SQLite plugin blobs", async () => {
     const stateDir = makeStateDir();
     const legacyRoot = makeLegacyAccountRoot(stateDir);
     const storageFile = path.join(legacyRoot, "bot-storage.json");

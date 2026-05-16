@@ -20,14 +20,14 @@ const STORE_VERSION = 1;
 const PERSIST_DEBOUNCE_MS = 250;
 export const MATRIX_SYNC_STORE_NAMESPACE = "sync-store";
 
-type PersistedMatrixSyncStore = {
+export type PersistedMatrixSyncStore = {
   version: number;
   savedSync: ISyncData | null;
   clientOptions?: IStoredClientOpts;
   cleanShutdown?: boolean;
 };
 
-type PersistedMatrixSyncStoreMetadata = {
+export type PersistedMatrixSyncStoreMetadata = {
   version: number;
   cleanShutdown?: boolean;
   hasSavedSync: boolean;
@@ -139,6 +139,26 @@ function cloneJson<T>(value: T): T {
 
 function toStoredJson<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
+}
+
+export function serializePersistedMatrixSyncStoreBlob(payload: PersistedMatrixSyncStore): {
+  metadata: PersistedMatrixSyncStoreMetadata;
+  blob: Buffer;
+} {
+  const storedPayload = toStoredJson(payload);
+  const blob = Buffer.from(JSON.stringify(storedPayload));
+  return {
+    metadata: {
+      version: STORE_VERSION,
+      cleanShutdown: storedPayload.cleanShutdown === true,
+      hasSavedSync: storedPayload.savedSync !== null,
+      ...(storedPayload.savedSync?.nextBatch
+        ? { nextBatch: storedPayload.savedSync.nextBatch }
+        : {}),
+      payloadBytes: blob.byteLength,
+    },
+    blob,
+  };
 }
 
 function syncDataToSyncResponse(syncData: ISyncData): ISyncResponse {
@@ -300,20 +320,10 @@ export class SqliteBackedMatrixSyncStore extends MemoryStore {
       cleanShutdown: this.cleanShutdown,
       ...(this.savedClientOptions ? { clientOptions: cloneJson(this.savedClientOptions) } : {}),
     });
-    const blob = Buffer.from(JSON.stringify(payload));
+    const { metadata, blob } = serializePersistedMatrixSyncStoreBlob(payload);
     try {
       await this.persistLock(async () => {
-        this.syncStore.register(
-          resolveMatrixSyncStoreKey(this.rootDir),
-          {
-            version: STORE_VERSION,
-            cleanShutdown: payload.cleanShutdown === true,
-            hasSavedSync: payload.savedSync !== null,
-            ...(payload.savedSync?.nextBatch ? { nextBatch: payload.savedSync.nextBatch } : {}),
-            payloadBytes: blob.byteLength,
-          },
-          blob,
-        );
+        this.syncStore.register(resolveMatrixSyncStoreKey(this.rootDir), metadata, blob);
         claimCurrentTokenStorageState({
           rootDir: this.rootDir,
         });

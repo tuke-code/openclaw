@@ -1,7 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
-import { resetPluginStateStoreForTests } from "openclaw/plugin-sdk/plugin-state-runtime";
+import {
+  resetPluginBlobStoreForTests,
+  resetPluginStateStoreForTests,
+} from "openclaw/plugin-sdk/plugin-state-runtime";
 import { withTempHome } from "openclaw/plugin-sdk/test-env";
 import { afterEach, describe, expect, it } from "vitest";
 import { detectLegacyMatrixState } from "./doctor-legacy-state-detection.js";
@@ -28,6 +31,7 @@ function writeLegacySyncStore(filePath: string) {
 describe("matrix legacy state migration", () => {
   afterEach(() => {
     resetPluginStateStoreForTests();
+    resetPluginBlobStoreForTests();
   });
 
   it("migrates the flat legacy Matrix store into account-scoped storage", async () => {

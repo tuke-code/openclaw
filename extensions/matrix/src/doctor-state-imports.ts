@@ -17,6 +17,7 @@ import {
   MATRIX_SYNC_STORE_NAMESPACE,
   parsePersistedMatrixSyncStore,
   resolveMatrixSyncStoreKey,
+  serializePersistedMatrixSyncStoreBlob,
 } from "./matrix/client/sqlite-sync-store.js";
 import {
   MATRIX_STORAGE_META_NAMESPACE,
@@ -214,11 +215,13 @@ function importSyncStoreFiles(root: string, env: NodeJS.ProcessEnv): ImportResul
       warnings.push(`Skipped invalid Matrix sync store file: ${filePath}`);
       continue;
     }
-    upsertPluginStateMigrationEntry({
+    const { metadata, blob } = serializePersistedMatrixSyncStoreBlob(parsed);
+    upsertPluginBlobMigrationEntry({
       pluginId: MATRIX_PLUGIN_ID,
       namespace: MATRIX_SYNC_STORE_NAMESPACE,
       key: resolveMatrixSyncStoreKey(path.dirname(filePath)),
-      value: parsed,
+      metadata,
+      blob,
       createdAt: fs.statSync(filePath).mtimeMs || Date.now(),
       env,
     });
@@ -419,7 +422,6 @@ function pluginStatePlan(params: {
   label: string;
   sourcePath: string;
   namespace:
-    | typeof MATRIX_SYNC_STORE_NAMESPACE
     | typeof MATRIX_STORAGE_META_NAMESPACE
     | typeof MATRIX_LEGACY_CRYPTO_MIGRATION_NAMESPACE
     | "thread-bindings"
@@ -447,7 +449,7 @@ function pluginStatePlan(params: {
 function pluginBlobPlan(params: {
   label: string;
   sourcePath: string;
-  namespace: typeof MATRIX_IDB_SNAPSHOT_NAMESPACE;
+  namespace: typeof MATRIX_IDB_SNAPSHOT_NAMESPACE | typeof MATRIX_SYNC_STORE_NAMESPACE;
   importSource: (sourcePath: string, env: NodeJS.ProcessEnv) => ImportResult;
 }): ChannelDoctorLegacyStateMigrationPlan {
   return {
@@ -474,7 +476,7 @@ export function detectMatrixLegacyStateMigrations(params: {
   const plans: ChannelDoctorLegacyStateMigrationPlan[] = [];
   if (collectFiles(root, SYNC_STORE_FILENAME).length > 0) {
     plans.push(
-      pluginStatePlan({
+      pluginBlobPlan({
         label: "Matrix sync store",
         sourcePath: root,
         namespace: MATRIX_SYNC_STORE_NAMESPACE,

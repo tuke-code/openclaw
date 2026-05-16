@@ -52,7 +52,7 @@ export function formatMatrixLegacyStatePreview(
 ): string {
   return [
     "- Matrix plugin upgraded in place.",
-    `- Legacy sync store: ${detection.legacyStoragePath} -> SQLite plugin state (${detection.targetRootDir})`,
+    `- Legacy sync store: ${detection.legacyStoragePath} -> SQLite plugin blob (${detection.targetRootDir})`,
     `- Legacy crypto store: ${detection.legacyCryptoPath} -> ${detection.targetCryptoPath}`,
     ...(detection.selectionNote ? [`- ${detection.selectionNote}`] : []),
     '- Run "openclaw doctor --fix" to migrate this Matrix state now.',
