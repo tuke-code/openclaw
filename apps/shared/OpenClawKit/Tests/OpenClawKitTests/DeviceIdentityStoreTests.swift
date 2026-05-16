@@ -156,8 +156,32 @@ struct DeviceIdentityStoreTests {
                 scopes: ["read"])
             try FileManager.default.createDirectory(at: Self.databaseURL(stateDir: stateDir), withIntermediateDirectories: true)
 
-            #expect(DeviceAuthStore.loadToken(deviceId: "device-1", role: "gateway") == nil)
+            let entry = try #require(DeviceAuthStore.loadToken(deviceId: "device-1", role: "gateway"))
+            #expect(entry.token == "token-1")
+            #expect(entry.scopes == ["read"])
             #expect(FileManager.default.fileExists(atPath: legacyURL.path))
+        }
+    }
+
+    @Test("falls back to legacy device auth sidecar when SQLite write fails")
+    func fallsBackToLegacyDeviceAuthSidecarWhenSQLiteWriteFails() throws {
+        try Self.withTempStateDir { stateDir in
+            try FileManager.default.createDirectory(
+                at: Self.databaseURL(stateDir: stateDir),
+                withIntermediateDirectories: true)
+
+            let entry = DeviceAuthStore.storeToken(
+                deviceId: "device-1",
+                role: " gateway ",
+                token: "token-fallback",
+                scopes: ["write"])
+
+            #expect(entry.token == "token-fallback")
+            #expect(entry.role == "gateway")
+            #expect(FileManager.default.fileExists(atPath: Self.legacyAuthURL(stateDir: stateDir).path))
+            let loaded = try #require(DeviceAuthStore.loadToken(deviceId: "device-1", role: "gateway"))
+            #expect(loaded.token == "token-fallback")
+            #expect(loaded.scopes == ["write"])
         }
     }
 

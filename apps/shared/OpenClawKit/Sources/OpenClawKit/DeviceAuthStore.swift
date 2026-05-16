@@ -57,7 +57,7 @@ public enum DeviceAuthStore {
                 self.removeLegacyToken(deviceId: deviceId, role: normalizedRole)
             }
         } catch {
-            // best-effort only
+            self.writeLegacyStore(DeviceAuthStoreFile(version: 1, deviceId: deviceId, tokens: [normalizedRole: entry]))
         }
         return entry
     }
@@ -85,6 +85,14 @@ public enum DeviceAuthStore {
             role: row.role,
             scopes: self.decodeScopes(row.scopesJSON),
             updatedAtMs: row.updatedAtMs)
+    }
+
+    private static func normalizedLegacyEntry(_ entry: DeviceAuthEntry) -> DeviceAuthEntry {
+        DeviceAuthEntry(
+            token: entry.token,
+            role: self.normalizeRole(entry.role),
+            scopes: self.normalizeScopes(entry.scopes),
+            updatedAtMs: entry.updatedAtMs)
     }
 
     private static func row(deviceId: String, entry: DeviceAuthEntry) -> OpenClawSQLiteDeviceAuthTokenRow {
@@ -143,16 +151,12 @@ public enum DeviceAuthStore {
         guard let store = self.readLegacyStore(), store.deviceId == deviceId else { return nil }
         do {
             for entry in store.tokens.values {
-                let normalized = DeviceAuthEntry(
-                    token: entry.token,
-                    role: self.normalizeRole(entry.role),
-                    scopes: self.normalizeScopes(entry.scopes),
-                    updatedAtMs: entry.updatedAtMs)
+                let normalized = self.normalizedLegacyEntry(entry)
                 try OpenClawSQLiteStateStore.upsertDeviceAuthToken(self.row(deviceId: deviceId, entry: normalized))
             }
             try FileManager.default.removeItem(at: self.legacyFileURL())
         } catch {
-            return nil
+            return store.tokens[role].map(self.normalizedLegacyEntry)
         }
         return OpenClawSQLiteStateStore.readDeviceAuthToken(deviceId: deviceId, role: role).map(self.entry(from:))
     }

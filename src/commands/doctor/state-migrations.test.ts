@@ -278,6 +278,8 @@ describe("doctor legacy state migrations", () => {
         result: "rename",
         configPath: "/tmp/openclaw.json",
         nextHash: "next-hash",
+        argv: ["openclaw", "--api-key", "sk-legacy-secret", "--safe", "value"],
+        execArgv: ["--token=ghp_legacy_secret"],
       })}\n`,
       "utf-8",
     );
@@ -303,16 +305,21 @@ describe("doctor legacy state migrations", () => {
     expect(result.changes.join("\n")).toContain(
       "Imported 1 config audit record(s) into SQLite plugin state",
     );
-    await expect(auditStore.entries()).resolves.toEqual([
+    const entries = await auditStore.entries();
+    expect(entries).toEqual([
       expect.objectContaining({
         value: expect.objectContaining({
           event: "config.write",
           result: "rename",
           configPath: "/tmp/openclaw.json",
           nextHash: "next-hash",
+          argv: ["openclaw", "--api-key", "***", "--safe", "value"],
+          execArgv: ["--token=***"],
         }),
       }),
     ]);
+    expect(JSON.stringify(entries)).not.toContain("sk-legacy-secret");
+    expect(JSON.stringify(entries)).not.toContain("ghp_legacy_secret");
     expect(fs.existsSync(sourcePath)).toBe(false);
   });
 

@@ -15,7 +15,11 @@ import {
   listBundledChannelDoctorLegacyStateDetectors,
 } from "../../channels/plugins/bundled.js";
 import type { ChannelDoctorLegacyStateMigrationPlan } from "../../channels/plugins/types.core.js";
-import { CONFIG_AUDIT_NAMESPACE, CONFIG_AUDIT_OWNER_ID } from "../../config/io.audit.js";
+import {
+  CONFIG_AUDIT_NAMESPACE,
+  CONFIG_AUDIT_OWNER_ID,
+  redactConfigAuditArgv,
+} from "../../config/io.audit.js";
 import {
   normalizeEnvPathOverride,
   resolveLegacyStateDirs,
@@ -652,6 +656,20 @@ function legacyConfigAuditKey(lineNumber: number, rawLine: string): string {
   return `legacy:${lineNumber}:${digest}`;
 }
 
+function redactLegacyConfigAuditRecord(record: Record<string, unknown>): Record<string, unknown> {
+  const redacted = { ...record };
+  for (const key of ["argv", "execArgv"] as const) {
+    const value = redacted[key];
+    if (
+      Array.isArray(value) &&
+      value.every((entry): entry is string => typeof entry === "string")
+    ) {
+      redacted[key] = redactConfigAuditArgv(value);
+    }
+  }
+  return redacted;
+}
+
 function importLegacyConfigAuditToSqlite(
   filePath: string,
   env: NodeJS.ProcessEnv,
@@ -678,9 +696,10 @@ function importLegacyConfigAuditToSqlite(
         typeof (parsed as { ts?: unknown }).ts === "string"
           ? Date.parse((parsed as { ts: string }).ts)
           : Number.NaN;
+      const redacted = redactLegacyConfigAuditRecord(parsed as Record<string, unknown>);
       records.push({
         key: legacyConfigAuditKey(index + 1, trimmed),
-        valueJson: JSON.stringify(parsed),
+        valueJson: JSON.stringify(redacted),
         createdAt: Number.isFinite(timestamp) ? timestamp : Date.now(),
       });
     } catch (err) {
