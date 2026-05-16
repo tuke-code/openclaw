@@ -792,6 +792,9 @@ export function classifySessionKey(key: string, entry?: SessionEntry): GatewaySe
   if (entry?.chatType === "group" || entry?.chatType === "channel") {
     return "group";
   }
+  if (parseGroupKey(key)) {
+    return "group";
+  }
   return "direct";
 }
 
