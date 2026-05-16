@@ -571,6 +571,7 @@ export async function emitGatewayBeforeResetPluginHook(params: {
     if (typeof sessionId === "string" && sessionId.trim().length > 0) {
       messages = await readGatewayBeforeResetMessages({
         agentId,
+        path: params.target.databasePath,
         sessionId,
       });
     }
@@ -600,6 +601,7 @@ export async function emitGatewayBeforeResetPluginHook(params: {
 
 async function readGatewayBeforeResetMessages(params: {
   agentId: string;
+  path?: string;
   sessionId: string;
 }): Promise<unknown[]> {
   const scopedMessages = loadScopedGatewayBeforeResetMessages(params);
@@ -609,6 +611,7 @@ async function readGatewayBeforeResetMessages(params: {
   return await readSessionMessagesAsync(
     {
       agentId: params.agentId,
+      path: params.path,
       sessionId: params.sessionId,
     },
     {
@@ -620,6 +623,7 @@ async function readGatewayBeforeResetMessages(params: {
 
 function loadScopedGatewayBeforeResetMessages(params: {
   agentId: string;
+  path?: string;
   sessionId: string;
 }): unknown[] | undefined {
   try {
@@ -681,6 +685,7 @@ export async function performGatewaySessionReset(params: {
   let deleteOldTranscript = false;
   const currentEntry = getSessionEntry({
     agentId: target.agentId,
+    path: target.databasePath,
     sessionKey: target.canonicalKey,
   });
   resetSourceEntry = currentEntry ? { ...currentEntry } : undefined;
@@ -791,7 +796,13 @@ export async function performGatewaySessionReset(params: {
     reason: params.reason,
   });
 
-  if (!hasSqliteSessionTranscriptEvents({ agentId: target.agentId, sessionId: next.sessionId })) {
+  if (
+    !hasSqliteSessionTranscriptEvents({
+      agentId: target.agentId,
+      path: target.databasePath,
+      sessionId: next.sessionId,
+    })
+  ) {
     const header = {
       type: "session",
       version: CURRENT_SESSION_VERSION,
@@ -801,6 +812,7 @@ export async function performGatewaySessionReset(params: {
     };
     appendSqliteSessionTranscriptEvent({
       agentId: target.agentId,
+      path: target.databasePath,
       sessionId: next.sessionId,
       event: header,
     });
@@ -823,6 +835,7 @@ export async function performGatewaySessionReset(params: {
   if (deleteOldTranscript && oldSessionId) {
     deleteSqliteSessionTranscript({
       agentId: target.agentId,
+      path: target.databasePath,
       sessionId: oldSessionId,
     });
   }
