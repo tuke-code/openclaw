@@ -479,7 +479,7 @@ export function listSqliteSessionTranscripts(
     ? [
         {
           agentId: normalizeAgentId(options.agentId),
-          path: undefined,
+          path: options.path,
         },
       ]
     : listOpenClawRegisteredAgentDatabases(options);

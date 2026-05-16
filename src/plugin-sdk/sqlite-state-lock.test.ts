@@ -117,6 +117,23 @@ describe("withOpenClawStateLock", () => {
     });
   });
 
+  it("releases the lease when the guarded task throws synchronously", async () => {
+    await withTempDir({ prefix: "openclaw-state-lock-sync-throw-" }, async (dir) => {
+      const dbPath = path.join(dir, "state.sqlite");
+      expect.assertions(2);
+
+      await expect(
+        withOpenClawStateLock("shared", { path: dbPath, retries: FAST_RETRY }, () => {
+          throw new Error("boom");
+        }),
+      ).rejects.toThrow("boom");
+
+      await expect(
+        withOpenClawStateLock("shared", { path: dbPath, retries: FAST_RETRY }, async () => "ok"),
+      ).resolves.toBe("ok");
+    });
+  });
+
   it("rejects and aborts the guarded task when lease renewal loses ownership", async () => {
     await withTempDir({ prefix: "openclaw-state-lock-lost-" }, async (dir) => {
       const dbPath = path.join(dir, "state.sqlite");
@@ -135,16 +152,19 @@ describe("withOpenClawStateLock", () => {
       });
       await entered;
 
-      runOpenClawStateWriteTransaction((database) => {
-        const db = getNodeSqliteKysely<StateLockTestDatabase>(database.db);
-        executeSqliteQuerySync(
-          database.db,
-          db
-            .deleteFrom("state_leases")
-            .where("scope", "=", "runtime.lock")
-            .where("lease_key", "=", "shared"),
-        );
-      }, { path: dbPath });
+      runOpenClawStateWriteTransaction(
+        (database) => {
+          const db = getNodeSqliteKysely<StateLockTestDatabase>(database.db);
+          executeSqliteQuerySync(
+            database.db,
+            db
+              .deleteFrom("state_leases")
+              .where("scope", "=", "runtime.lock")
+              .where("lease_key", "=", "shared"),
+          );
+        },
+        { path: dbPath },
+      );
 
       await expect(locked).rejects.toThrow("Lost SQLite state lock runtime.lock:shared");
       expect(signal.aborted).toBe(true);

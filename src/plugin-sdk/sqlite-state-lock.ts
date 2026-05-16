@@ -277,9 +277,9 @@ export async function withOpenClawStateLock<T>(
         }
       }, renewEveryMs);
       renewal.unref?.();
-      const taskPromise = task(abortController.signal);
-      void taskPromise.catch(() => {});
       try {
+        const taskPromise = Promise.resolve(task(abortController.signal));
+        void taskPromise.catch(() => {});
         return await Promise.race([taskPromise, lostLock]);
       } finally {
         clearInterval(renewal);

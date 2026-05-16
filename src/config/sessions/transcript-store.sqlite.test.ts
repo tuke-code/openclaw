@@ -458,6 +458,38 @@ describe("SQLite session transcript store", () => {
     ]);
   });
 
+  it("preserves an explicit transcript database path when listing by agent", () => {
+    const stateDir = createTempDir();
+    const env = { OPENCLAW_STATE_DIR: stateDir };
+    const customPath = path.join(stateDir, "custom-agent.sqlite");
+
+    appendSqliteSessionTranscriptEvent({
+      env,
+      path: customPath,
+      agentId: "worker-1",
+      sessionId: "session-1",
+      event: { type: "message", id: "m1" },
+      now: () => 100,
+    });
+
+    const [scope] = listSqliteSessionTranscripts({
+      env,
+      path: customPath,
+      agentId: "worker-1",
+    });
+
+    expect(scope).toEqual({
+      agentId: "worker-1",
+      path: customPath,
+      sessionId: "session-1",
+      updatedAt: 100,
+      eventCount: 1,
+    });
+    expect(
+      scope ? loadSqliteSessionTranscriptEvents(scope).map((entry) => entry.event) : [],
+    ).toEqual([{ type: "message", id: "m1" }]);
+  });
+
   it("deletes transcript snapshots with the transcript", () => {
     const stateDir = createTempDir();
     const env = { OPENCLAW_STATE_DIR: stateDir };
