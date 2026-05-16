@@ -1734,6 +1734,7 @@ export type PluginPackageChannel = {
   showInSetup?: boolean;
   quickstartAllowFrom?: boolean;
   forceAccountBinding?: boolean;
+  preferSessionLookupForAnnounceTarget?: boolean;
   commands?: PluginManifestChannelCommandDefaults;
   configuredState?: {
     specifier?: string;
