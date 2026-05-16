@@ -301,9 +301,17 @@ export class SqliteVirtualAgentFs implements VirtualAgentFs {
 
   remove(filePath: string, options: VirtualAgentFsRemoveOptions = {}): void {
     const normalized = normalizeVfsPath(filePath);
-    const descendants = this.#allRows().filter((row) => row.path.startsWith(`${normalized}/`));
+    const rows = this.#allRows().filter(
+      (row) =>
+        row.path === normalized ||
+        (normalized === "/" ? row.path !== "/" : row.path.startsWith(`${normalized}/`)),
+    );
+    const descendants = rows.filter((row) => row.path !== normalized);
     if (descendants.length > 0 && !options.recursive) {
       throw new Error(`VFS directory is not empty: ${normalized}`);
+    }
+    if (rows.length === 0) {
+      return;
     }
     runOpenClawAgentWriteTransaction((database) => {
       const db = getNodeSqliteKysely<VirtualAgentFsDatabase>(database.db);
@@ -312,8 +320,10 @@ export class SqliteVirtualAgentFs implements VirtualAgentFs {
         db
           .deleteFrom("vfs_entries")
           .where("namespace", "=", this.#options.namespace)
-          .where((eb) =>
-            eb.or([eb("path", "=", normalized), eb("path", "like", `${normalized}/%`)]),
+          .where(
+            "path",
+            "in",
+            rows.map((row) => row.path),
           ),
       );
     }, this.#options);

@@ -131,6 +131,45 @@ describe("SqliteVirtualAgentFs", () => {
     expect(scratch.stat("/archive/tmp/a.txt")).toBeNull();
   });
 
+  it("removes only exact descendant paths when virtual paths contain SQL wildcards", () => {
+    const env = { OPENCLAW_STATE_DIR: createTempStateDir() };
+    const scratch = createSqliteVirtualAgentFs({
+      agentId: "main",
+      namespace: "scratch",
+      env,
+    });
+
+    scratch.writeFile("/foo_/a.txt", "wildcard-like");
+    scratch.writeFile("/fooa/b.txt", "unrelated");
+    scratch.writeFile("/percent%/c.txt", "percent");
+    scratch.writeFile("/percentx/d.txt", "also unrelated");
+
+    scratch.remove("/foo_", { recursive: true });
+    scratch.remove("/percent%", { recursive: true });
+
+    expect(scratch.stat("/foo_/a.txt")).toBeNull();
+    expect(scratch.stat("/percent%/c.txt")).toBeNull();
+    expect(scratch.readFile("/fooa/b.txt").toString("utf8")).toBe("unrelated");
+    expect(scratch.readFile("/percentx/d.txt").toString("utf8")).toBe("also unrelated");
+  });
+
+  it("removes root descendants recursively", () => {
+    const env = { OPENCLAW_STATE_DIR: createTempStateDir() };
+    const scratch = createSqliteVirtualAgentFs({
+      agentId: "main",
+      namespace: "scratch",
+      env,
+    });
+
+    scratch.writeFile("/tmp/a.txt", "a");
+    scratch.writeFile("/other/b.txt", "b");
+
+    expect(() => scratch.remove("/")).toThrow("VFS directory is not empty: /");
+    scratch.remove("/", { recursive: true });
+
+    expect(scratch.list("/", { recursive: true })).toEqual([]);
+  });
+
   it("rejects ambiguous or cyclic renames", () => {
     const env = { OPENCLAW_STATE_DIR: createTempStateDir() };
     const scratch = createSqliteVirtualAgentFs({
