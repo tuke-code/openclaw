@@ -5,7 +5,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionEntry } from "../../config/sessions.js";
 import { listSessionEntries, upsertSessionEntry } from "../../config/sessions/store.js";
 import { appendSessionTranscriptMessage } from "../../config/sessions/transcript-append.js";
-import { loadSqliteSessionTranscriptEvents } from "../../config/sessions/transcript-store.sqlite.js";
+import {
+  appendSqliteSessionTranscriptEvent,
+  loadSqliteSessionTranscriptEvents,
+} from "../../config/sessions/transcript-store.sqlite.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { closeOpenClawStateDatabaseForTest } from "../../state/openclaw-state-db.js";
 import { saveAuthProfileStore } from "../auth-profiles/store.js";
@@ -613,7 +616,7 @@ describe("CLI attempt execution", () => {
       updatedAt: Date.now(),
     };
     const sessionStore: Record<string, SessionEntry> = { [sessionKey]: sessionEntry };
-    await fs.writeFile(storePath, JSON.stringify(sessionStore, null, 2), "utf-8");
+    await writeSessionEntries(sessionStore);
 
     const result = makeCliResult("already mirrored");
     result.meta.executionTrace = {
@@ -630,18 +633,17 @@ describe("CLI attempt execution", () => {
       sessionKey,
       sessionEntry,
       sessionStore,
-      storePath,
       sessionAgentId: "main",
       sessionCwd: tmpDir,
       config: {},
       embeddedAssistantGapFill: true,
     });
-    const sessionFile = updatedFirst?.sessionFile;
-    if (typeof sessionFile !== "string") {
-      throw new Error("Expected CLI transcript session file.");
-    }
 
-    await fs.appendFile(sessionFile, "{truncated-json\n", "utf-8");
+    appendSqliteSessionTranscriptEvent({
+      agentId: "main",
+      sessionId: sessionEntry.sessionId,
+      event: { type: "truncated-jsonl-placeholder" },
+    });
 
     await persistCliTurnTranscript({
       body: "still ignored",
@@ -650,26 +652,14 @@ describe("CLI attempt execution", () => {
       sessionKey,
       sessionEntry: updatedFirst,
       sessionStore,
-      storePath,
       sessionAgentId: "main",
       sessionCwd: tmpDir,
       config: {},
       embeddedAssistantGapFill: true,
     });
 
-    const validEntries = (await fs.readFile(sessionFile, "utf-8"))
-      .split(/\r?\n/)
-      .flatMap((line) => {
-        if (!line) {
-          return [];
-        }
-        try {
-          return [JSON.parse(line) as { type?: string; message?: { role?: string } }];
-        } catch {
-          return [];
-        }
-      });
-    expect(validEntries.filter((entry) => entry.type === "message")).toHaveLength(1);
+    const messages = await readSessionMessages(sessionEntry.sessionId);
+    expect(messages).toHaveLength(1);
   });
 
   it("embedded assistant gap-fill skips trailing openclaw.cache-ttl custom entries (regression for #83427)", async () => {
