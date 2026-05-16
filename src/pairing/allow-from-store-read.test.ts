@@ -20,6 +20,7 @@ function makeEnv(homeDir: string): NodeJS.ProcessEnv {
   return {
     ...process.env,
     HOME: homeDir,
+    OPENCLAW_STATE_DIR: path.join(homeDir, ".openclaw"),
   };
 }
 
@@ -43,6 +44,23 @@ async function writeAllowFromStore(params: {
       entry,
     });
   }
+}
+
+function writeLegacyAllowFromStore(params: {
+  env: NodeJS.ProcessEnv;
+  channel: "telegram";
+  accountId?: string;
+  allowFrom: string[];
+}): void {
+  const stateDir = params.env.OPENCLAW_STATE_DIR ?? path.join(params.env.HOME ?? "", ".openclaw");
+  const credentialsDir = path.join(stateDir, "credentials");
+  fs.mkdirSync(credentialsDir, { recursive: true });
+  const suffix = params.accountId ? `-${params.accountId}` : "";
+  fs.writeFileSync(
+    path.join(credentialsDir, `${params.channel}${suffix}-allowFrom.json`),
+    `${JSON.stringify({ version: 1, allowFrom: params.allowFrom })}\n`,
+    "utf8",
+  );
 }
 
 beforeAll(() => {
@@ -90,5 +108,43 @@ describe("allow-from-store-read", () => {
       "work-a",
       "work-b",
     ]);
+  });
+
+  it("preserves legacy default allowFrom entries before doctor migration", () => {
+    const env = makeEnv(makeHomeDir());
+    writeLegacyAllowFromStore({
+      channel: "telegram",
+      env,
+      allowFrom: [" legacy-a ", "legacy-a", "legacy-b"],
+    });
+    writeLegacyAllowFromStore({
+      channel: "telegram",
+      env,
+      accountId: "default",
+      allowFrom: ["scoped-default"],
+    });
+
+    expect(readChannelAllowFromStoreEntriesSync("telegram", env)).toEqual([
+      "scoped-default",
+      "legacy-a",
+      "legacy-b",
+    ]);
+  });
+
+  it("preserves scoped legacy allowFrom without leaking default entries", () => {
+    const env = makeEnv(makeHomeDir());
+    writeLegacyAllowFromStore({
+      channel: "telegram",
+      env,
+      allowFrom: ["default-a"],
+    });
+    writeLegacyAllowFromStore({
+      channel: "telegram",
+      env,
+      accountId: "work",
+      allowFrom: ["work-a"],
+    });
+
+    expect(readChannelAllowFromStoreEntriesSync("telegram", env, "work")).toEqual(["work-a"]);
   });
 });
