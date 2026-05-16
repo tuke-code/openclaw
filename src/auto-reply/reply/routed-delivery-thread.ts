@@ -1,4 +1,4 @@
-import { parseSessionThreadInfoFast } from "../../config/sessions/thread-info.js";
+import { parseThreadSessionSuffix } from "../../routing/session-key.js";
 import type { MsgContext } from "../templating.js";
 
 export function resolveRoutedDeliveryThreadId(params: {
@@ -11,5 +11,5 @@ export function resolveRoutedDeliveryThreadId(params: {
   if (params.ctx.TransportThreadId != null) {
     return params.ctx.TransportThreadId;
   }
-  return parseSessionThreadInfoFast(params.sessionKey).threadId;
+  return parseThreadSessionSuffix(params.sessionKey).threadId;
 }

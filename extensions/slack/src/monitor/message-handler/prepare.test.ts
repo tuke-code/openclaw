@@ -1914,18 +1914,8 @@ Second paragraph should still reach the agent after Slack's preview cutoff.`;
   });
 
   it("preserves Slack thread history when an existing DM session receives a thread reply", async () => {
-    const { storePath } = storeFixture.makeTmpStorePath();
-    fs.writeFileSync(
-      storePath,
-      JSON.stringify(
-        {
-          "agent:main:main": { updatedAt: Date.now() },
-          "agent:main:main:thread:650.000": { updatedAt: Date.now() },
-        },
-        null,
-        2,
-      ),
-    );
+    seedExistingSession("agent:main:main");
+    seedExistingSession("agent:main:main:thread:650.000");
     const replies = vi
       .fn()
       .mockResolvedValueOnce({
@@ -1942,7 +1932,6 @@ Second paragraph should still reach the agent after Slack's preview cutoff.`;
       });
     const slackCtx = createInboundSlackCtx({
       cfg: {
-        session: { store: storePath },
         channels: { slack: { enabled: true, replyToMode: "all" } },
       } as OpenClawConfig,
       appClient: { conversations: { replies } } as unknown as App["client"],
