@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { resetPluginBlobStoreForTests } from "openclaw/plugin-sdk/plugin-state-runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetPluginStateStoreForTests } from "../../../src/plugin-state/plugin-state-store.js";
 import { seedPluginStateEntriesForTests } from "../../../src/plugin-state/plugin-state-store.test-helpers.js";
@@ -151,13 +152,13 @@ describe("AcpxRuntime fresh reset wrapper", () => {
     } else {
       process.env.OPENCLAW_STATE_DIR = ORIGINAL_STATE_DIR;
     }
-    resetPluginStateStoreForTests();
+    resetPluginBlobStoreForTests();
   });
 
   it("keys SQLite session records by acpxRecordId before display name", async () => {
     const stateDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-acpx-session-store-"));
     process.env.OPENCLAW_STATE_DIR = stateDir;
-    resetPluginStateStoreForTests();
+    resetPluginBlobStoreForTests();
 
     const store = createSqliteSessionStore();
     const record = {
@@ -174,50 +175,34 @@ describe("AcpxRuntime fresh reset wrapper", () => {
       });
       await expect(store.load(record.name)).resolves.toBeUndefined();
     } finally {
-      resetPluginStateStoreForTests();
+      resetPluginBlobStoreForTests();
       await fs.rm(stateDir, { recursive: true, force: true });
     }
   });
 
-  it("persists a runtime session above the old plugin-wide row cap", async () => {
+  it("persists a runtime session above the keyed-state value cap", async () => {
     const stateDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-acpx-session-store-"));
     process.env.OPENCLAW_STATE_DIR = stateDir;
-    resetPluginStateStoreForTests();
+    resetPluginBlobStoreForTests();
 
     const store = createSqliteSessionStore();
-    const lastRecordId = "agent:codex:acp:oneshot:run-1000";
+    const largeTranscript = "x".repeat(70_000);
+    const acpxRecordId = "agent:codex:acp:persistent:run-large";
 
     try {
-      seedPluginStateEntriesForTests(
-        Array.from({ length: 1_000 }, (_, entryIndex) => {
-          const acpxRecordId = `agent:codex:acp:oneshot:run-${entryIndex}`;
-          return {
-            pluginId: "acpx",
-            namespace: "runtime-sessions",
-            key: acpxRecordId,
-            value: {
-              name: `agent:codex:acp:oneshot-${entryIndex}`,
-              sessionKey: "agent:codex:acp:oneshot",
-              acpxRecordId,
-            },
-          };
-        }),
-      );
-
       await store.save({
-        name: "agent:codex:acp:oneshot-overflow",
-        sessionKey: "agent:codex:acp:oneshot",
-        acpxRecordId: lastRecordId,
+        name: "agent:codex:acp:persistent",
+        sessionKey: "agent:codex:acp:persistent",
+        acpxRecordId,
+        events: [{ type: "assistant", text: largeTranscript }],
       } as never);
 
-      await expect(store.load(lastRecordId)).resolves.toMatchObject({
-        acpxRecordId: lastRecordId,
-      });
-      await expect(store.load("agent:codex:acp:oneshot:run-999")).resolves.toMatchObject({
-        acpxRecordId: "agent:codex:acp:oneshot:run-999",
+      await expect(store.load(acpxRecordId)).resolves.toMatchObject({
+        acpxRecordId,
+        events: [{ type: "assistant", text: largeTranscript }],
       });
     } finally {
-      resetPluginStateStoreForTests();
+      resetPluginBlobStoreForTests();
       await fs.rm(stateDir, { recursive: true, force: true });
     }
   });
