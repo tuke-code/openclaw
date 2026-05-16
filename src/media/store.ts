@@ -661,18 +661,20 @@ async function materializeMediaBufferPath(params: {
   buffer: Buffer;
 }): Promise<string> {
   const dir = resolveMediaScopedDir(params.subdir, "materializeMediaBufferPath");
-  await fs.mkdir(dir, { recursive: true, mode: 0o700 });
-  const written = await writeSiblingTempFile({
-    dir,
-    mode: MEDIA_FILE_MODE,
-    tempPrefix: `.${params.id}`,
-    writeTemp: async (tempPath) => {
-      await fs.writeFile(tempPath, params.buffer, { mode: MEDIA_FILE_MODE });
-      return undefined;
-    },
-    resolveFinalPath: () => path.join(dir, params.id),
+  return await retryAfterRecreatingDir(dir, async () => {
+    await fs.mkdir(dir, { recursive: true, mode: 0o700 });
+    const written = await writeSiblingTempFile({
+      dir,
+      mode: MEDIA_FILE_MODE,
+      tempPrefix: `.${params.id}`,
+      writeTemp: async (tempPath) => {
+        await fs.writeFile(tempPath, params.buffer, { mode: MEDIA_FILE_MODE });
+        return undefined;
+      },
+      resolveFinalPath: () => path.join(dir, params.id),
+    });
+    return written.filePath;
   });
-  return written.filePath;
 }
 
 async function writeMediaStreamToFile(params: {

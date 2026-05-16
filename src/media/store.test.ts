@@ -305,6 +305,37 @@ describe("media store", () => {
       },
     },
     {
+      name: "retries buffer materialization when cleanup prunes the target dir",
+      run: async () => {
+        await withTempStore(async (store) => {
+          const originalMkdir = fs.mkdir.bind(fs);
+          let pruned = false;
+          vi.spyOn(fs, "mkdir").mockImplementation(async (...args) => {
+            const result = await originalMkdir(...args);
+            const target = args[0];
+            if (
+              !pruned &&
+              typeof target === "string" &&
+              path.normalize(target).endsWith(`${path.sep}media${path.sep}materialization-race`)
+            ) {
+              pruned = true;
+              await fs.rm(target, { force: true, recursive: true });
+            }
+            return result;
+          });
+
+          const saved = await store.saveMediaBuffer(
+            Buffer.from("race bytes"),
+            "text/plain",
+            "materialization-race",
+          );
+
+          expect(pruned).toBe(true);
+          await expect(fs.readFile(saved.path, "utf8")).resolves.toBe("race bytes");
+        });
+      },
+    },
+    {
       name: "rejects traversal media subdirs before saving buffers",
       run: async () => {
         await withTempStore(async (store, home) => {
