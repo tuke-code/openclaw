@@ -57,7 +57,11 @@ public enum DeviceAuthStore {
                 self.removeLegacyToken(deviceId: deviceId, role: normalizedRole)
             }
         } catch {
-            self.writeLegacyStore(DeviceAuthStoreFile(version: 1, deviceId: deviceId, tokens: [normalizedRole: entry]))
+            var fallback =
+                self.readLegacyStore().flatMap { $0.deviceId == deviceId ? $0 : nil }
+                    ?? DeviceAuthStoreFile(version: 1, deviceId: deviceId, tokens: [:])
+            fallback.tokens[normalizedRole] = entry
+            self.writeLegacyStore(fallback)
         }
         return entry
     }

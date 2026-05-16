@@ -157,6 +157,41 @@ describe("SQLite session row backend", () => {
     });
   });
 
+  it("preserves channel-only delivery context without a conversation peer", () => {
+    const stateDir = createTempDir();
+    const env = { OPENCLAW_STATE_DIR: stateDir };
+
+    upsertSessionEntry({
+      agentId: "ops",
+      env,
+      sessionKey: "webchat:main",
+      entry: {
+        sessionId: "webchat-session",
+        updatedAt: 200,
+        channel: "webchat",
+        deliveryContext: {
+          channel: "webchat",
+        },
+        lastChannel: "webchat",
+      },
+    });
+
+    const loaded = getSessionEntry({
+      agentId: "ops",
+      env,
+      sessionKey: "webchat:main",
+    });
+    expect(loaded).toMatchObject({
+      sessionId: "webchat-session",
+      channel: "webchat",
+      deliveryContext: {
+        channel: "webchat",
+      },
+      lastChannel: "webchat",
+    });
+    expect(loaded?.lastTo).toBeUndefined();
+  });
+
   it("stores hot session metadata in canonical session roots", () => {
     const stateDir = createTempDir();
     const env = { OPENCLAW_STATE_DIR: stateDir };

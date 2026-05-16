@@ -13,7 +13,10 @@ import {
   runOpenClawAgentWriteTransaction,
 } from "../../state/openclaw-agent-db.js";
 import { type OpenClawStateDatabaseOptions } from "../../state/openclaw-state-db.js";
-import { normalizeDeliveryContext } from "../../utils/delivery-context.shared.js";
+import {
+  normalizeDeliveryContext,
+  normalizeSessionDeliveryFields,
+} from "../../utils/delivery-context.shared.js";
 import {
   conversationIdentityFromSessionEntry,
   type ConversationIdentity,
@@ -142,19 +145,23 @@ function clearCompatibilityRoutingShadow(
 }
 
 function projectCompatibilityRoutingShadow(entry: SessionEntry): void {
-  const deliveryContext = normalizeDeliveryContext(entry.deliveryContext);
-  if (!deliveryContext?.channel || !deliveryContext.to) {
+  const normalized = normalizeSessionDeliveryFields(entry);
+  const deliveryContext = normalized.deliveryContext;
+  if (!deliveryContext?.channel) {
     return;
   }
   entry.deliveryContext = deliveryContext;
-  entry.lastChannel = deliveryContext.channel;
-  entry.lastTo = deliveryContext.to;
-  entry.lastAccountId = deliveryContext.accountId;
-  entry.lastThreadId = deliveryContext.threadId;
+  entry.lastChannel = normalized.lastChannel;
+  entry.lastTo = normalized.lastTo;
+  entry.lastAccountId = normalized.lastAccountId;
+  entry.lastThreadId = normalized.lastThreadId;
 }
 
 function projectTypedSessionColumns(row: SessionEntryRow): SessionEntry | null {
   const parsed = parseSessionEntry(row);
+  const parsedDeliveryContext = parsed
+    ? normalizeSessionDeliveryFields(parsed).deliveryContext
+    : undefined;
   const sessionId = optionalString(row.typed_session_id) ?? parsed?.sessionId;
   const updatedAt =
     typeof row.typed_updated_at === "number" && Number.isFinite(row.typed_updated_at)
@@ -221,6 +228,9 @@ function projectTypedSessionColumns(row: SessionEntryRow): SessionEntry | null {
   }
   if (nativeDirectUserId) {
     next.nativeDirectUserId = nativeDirectUserId;
+  }
+  if (!next.deliveryContext && parsedDeliveryContext?.channel && !parsedDeliveryContext.to) {
+    next.deliveryContext = parsedDeliveryContext;
   }
   const modelProvider = optionalString(row.typed_model_provider);
   if (modelProvider) {

@@ -185,6 +185,33 @@ struct DeviceIdentityStoreTests {
         }
     }
 
+    @Test("merges legacy device auth sidecar when SQLite write fails")
+    func mergesLegacyDeviceAuthSidecarWhenSQLiteWriteFails() throws {
+        try Self.withTempStateDir { stateDir in
+            let legacyURL = Self.legacyAuthURL(stateDir: stateDir)
+            try Self.writeLegacyAuthSidecar(
+                legacyURL,
+                deviceId: "device-1",
+                token: "gateway-token",
+                scopes: ["read"])
+            try FileManager.default.createDirectory(
+                at: Self.databaseURL(stateDir: stateDir),
+                withIntermediateDirectories: true)
+
+            _ = DeviceAuthStore.storeToken(
+                deviceId: "device-1",
+                role: "operator",
+                token: "operator-token",
+                scopes: ["write"])
+
+            let data = try Data(contentsOf: legacyURL)
+            let root = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+            let tokens = try #require(root["tokens"] as? [String: Any])
+            #expect((tokens["gateway"] as? [String: Any])?["token"] as? String == "gateway-token")
+            #expect((tokens["operator"] as? [String: Any])?["token"] as? String == "operator-token")
+        }
+    }
+
     @Test("drops stale legacy device auth sidecar when storing a different device")
     func dropsStaleLegacyDeviceAuthSidecarWhenReplacingDevice() throws {
         try Self.withTempStateDir { stateDir in
