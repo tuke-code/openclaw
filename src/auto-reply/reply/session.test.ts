@@ -2360,7 +2360,7 @@ describe("initSessionState preserves behavior overrides across /new and /reset",
   });
 
   it("clears recovered auto fallback model overrides without modelOverrideSource on /new and /reset", async () => {
-    const storePath = await createStorePath("openclaw-reset-recovered-auto-fallback-");
+    await createSessionRowsTarget("openclaw-reset-recovered-auto-fallback-");
     const sessionKey = "agent:main:telegram:direct:6761477233";
     const existingSessionId = "existing-session-recovered-auto-fallback";
     const autoOverrides = {
@@ -2377,14 +2377,13 @@ describe("initSessionState preserves behavior overrides across /new and /reset",
 
     for (const testCase of cases) {
       await seedSessionStoreWithOverrides({
-        storePath,
         sessionKey,
         sessionId: existingSessionId,
         overrides: { ...autoOverrides },
       });
 
       const cfg = {
-        session: { store: storePath, idleMinutes: 999 },
+        session: { idleMinutes: 999 },
       } as OpenClawConfig;
 
       const result = await initSessionState({

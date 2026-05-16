@@ -130,7 +130,7 @@ function persistRejectedInboundCall(params: {
     processedEventIds: [params.dedupeKey],
     metadata: { rejectionReason: "inbound-policy" },
   };
-  persistCallRecord(params.ctx.storePath, rejectedCall);
+  persistCallRecord(params.ctx.callStore, rejectedCall);
 }
 
 export function processEvent(ctx: EventContext, event: NormalizedEvent): void {
