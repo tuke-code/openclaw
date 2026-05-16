@@ -23,4 +23,11 @@ describe("ci workflow guards", () => {
       "OPENCLAW_DOCS_SYNC_CLAWHUB_REPO: ${{ github.workspace }}/clawhub-source",
     );
   });
+
+  it("runs dependency guards in full local checks", () => {
+    const checkScript = readFileSync("scripts/check.mjs", "utf8");
+
+    expect(checkScript).toContain('args: ["deps:pins:check"]');
+    expect(checkScript).toContain('args: ["deps:patches:check"]');
+  });
 });

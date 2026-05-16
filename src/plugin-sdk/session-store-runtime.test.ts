@@ -54,7 +54,7 @@ describe("session-store-runtime compatibility", () => {
     );
   });
 
-  it("does not delete rows created after a compatibility snapshot was loaded", async () => {
+  it("overwrites the compatibility store when saving a replacement snapshot", async () => {
     await withOpenClawTestState(
       {
         layout: "state-only",
@@ -64,29 +64,28 @@ describe("session-store-runtime compatibility", () => {
       async (state) => {
         const env = testEnv(state.stateDir);
         const storePath = canonicalStorePath(state.stateDir);
-        const staleSnapshot = loadSessionStore(storePath);
-
         upsertSessionEntry({
           agentId: "main",
           env,
-          sessionKey: "agent:main:concurrent",
+          sessionKey: "agent:main:old",
           entry: {
-            sessionId: "concurrent-session",
+            sessionId: "old-session",
             updatedAt: 200,
             sessionStartedAt: 200,
           },
         });
 
-        staleSnapshot["agent:main:legacy"] = {
-          sessionId: "legacy-session",
-          updatedAt: 100,
-          sessionStartedAt: 100,
-        };
-        await saveSessionStore(storePath, staleSnapshot);
+        await saveSessionStore(storePath, {
+          "agent:main:legacy": {
+            sessionId: "legacy-session",
+            updatedAt: 100,
+            sessionStartedAt: 100,
+          },
+        });
 
         expect(
-          getSessionEntry({ agentId: "main", env, sessionKey: "agent:main:concurrent" })?.sessionId,
-        ).toBe("concurrent-session");
+          getSessionEntry({ agentId: "main", env, sessionKey: "agent:main:old" }),
+        ).toBeUndefined();
         expect(
           getSessionEntry({ agentId: "main", env, sessionKey: "agent:main:legacy" })?.sessionId,
         ).toBe("legacy-session");

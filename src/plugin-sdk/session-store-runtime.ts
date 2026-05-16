@@ -203,7 +203,8 @@ export async function saveSessionStore(
 ): Promise<void> {
   normalizeSessionEntries(store);
   const options = resolveSessionRowOptionsFromStorePath(storePath);
-  await saveSessionStoreRows(options, store);
+  const deleteScope = new Set(Object.keys(loadSqliteSessionEntries(options)));
+  await saveSessionStoreRows(options, store, deleteScope);
 }
 
 async function saveSessionStoreRows(
