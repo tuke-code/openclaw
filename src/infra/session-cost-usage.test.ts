@@ -288,95 +288,101 @@ describe("session cost usage", () => {
   });
 
   it("returns empty points for zero, negative, and non-finite maxPoints", async () => {
-    const root = await makeSessionCostRoot("timeseries-invalid-max-points");
-    const sessionsDir = path.join(root, "agents", "main", "sessions");
-    await fs.mkdir(sessionsDir, { recursive: true });
-    const sessionFile = path.join(sessionsDir, "sess-invalid-max-points.jsonl");
-    const entries = [
-      {
-        type: "message",
-        timestamp: new Date(Date.UTC(2026, 1, 12, 10, 1, 0)).toISOString(),
-        message: {
-          role: "assistant",
-          provider: "openai",
-          model: "gpt-5.4",
-          usage: {
-            input: 1,
-            output: 2,
-            cacheRead: 0,
-            cacheWrite: 0,
-            totalTokens: 3,
-            cost: { total: 0.001 },
+    const root = await makeRoot("timeseries-invalid-max-points");
+    await withStateDir(root, async () => {
+      writeTranscript({
+        sessionId: "sess-invalid-max-points",
+        events: [
+          {
+            type: "message",
+            timestamp: new Date(Date.UTC(2026, 1, 12, 10, 1, 0)).toISOString(),
+            message: {
+              role: "assistant",
+              provider: "openai",
+              model: "gpt-5.4",
+              usage: {
+                input: 1,
+                output: 2,
+                cacheRead: 0,
+                cacheWrite: 0,
+                totalTokens: 3,
+                cost: { total: 0.001 },
+              },
+            },
           },
-        },
-      },
-      {
-        type: "message",
-        timestamp: new Date(Date.UTC(2026, 1, 12, 10, 2, 0)).toISOString(),
-        message: {
-          role: "assistant",
-          provider: "openai",
-          model: "gpt-5.4",
-          usage: {
-            input: 2,
-            output: 4,
-            cacheRead: 0,
-            cacheWrite: 0,
-            totalTokens: 6,
-            cost: { total: 0.002 },
+          {
+            type: "message",
+            timestamp: new Date(Date.UTC(2026, 1, 12, 10, 2, 0)).toISOString(),
+            message: {
+              role: "assistant",
+              provider: "openai",
+              model: "gpt-5.4",
+              usage: {
+                input: 2,
+                output: 4,
+                cacheRead: 0,
+                cacheWrite: 0,
+                totalTokens: 6,
+                cost: { total: 0.002 },
+              },
+            },
           },
-        },
-      },
-    ];
-    await fs.writeFile(
-      sessionFile,
-      entries.map((entry) => JSON.stringify(entry)).join("\n"),
-      "utf-8",
-    );
+        ],
+      });
 
-    await expect(loadSessionUsageTimeSeries({ sessionFile, maxPoints: 0 })).resolves.toEqual({
-      sessionId: undefined,
-      points: [],
+      const base = { sessionId: "sess-invalid-max-points", points: [] };
+      await expect(
+        loadSessionUsageTimeSeries({ sessionId: "sess-invalid-max-points", maxPoints: 0 }),
+      ).resolves.toEqual(base);
+      await expect(
+        loadSessionUsageTimeSeries({ sessionId: "sess-invalid-max-points", maxPoints: -1 }),
+      ).resolves.toEqual(base);
+      await expect(
+        loadSessionUsageTimeSeries({
+          sessionId: "sess-invalid-max-points",
+          maxPoints: Number.NaN,
+        }),
+      ).resolves.toEqual(base);
+      await expect(
+        loadSessionUsageTimeSeries({
+          sessionId: "sess-invalid-max-points",
+          maxPoints: Number.POSITIVE_INFINITY,
+        }),
+      ).resolves.toEqual(base);
     });
-    await expect(loadSessionUsageTimeSeries({ sessionFile, maxPoints: -1 })).resolves.toEqual({
-      sessionId: undefined,
-      points: [],
-    });
-    await expect(
-      loadSessionUsageTimeSeries({ sessionFile, maxPoints: Number.NaN }),
-    ).resolves.toEqual({ sessionId: undefined, points: [] });
-    await expect(
-      loadSessionUsageTimeSeries({ sessionFile, maxPoints: Number.POSITIVE_INFINITY }),
-    ).resolves.toEqual({ sessionId: undefined, points: [] });
   });
 
   it("returns empty logs for zero, negative, and non-finite limits", async () => {
-    const root = await makeSessionCostRoot("session-logs-invalid-limit");
-    const sessionsDir = path.join(root, "agents", "main", "sessions");
-    await fs.mkdir(sessionsDir, { recursive: true });
-    const sessionFile = path.join(sessionsDir, "sess-invalid-limit.jsonl");
-    await fs.writeFile(
-      sessionFile,
-      [
-        JSON.stringify({
-          type: "message",
-          timestamp: new Date(Date.UTC(2026, 1, 12, 10, 0, 0)).toISOString(),
-          message: { role: "user", content: "hello" },
-        }),
-        JSON.stringify({
-          type: "message",
-          timestamp: new Date(Date.UTC(2026, 1, 12, 10, 1, 0)).toISOString(),
-          message: { role: "user", content: "world" },
-        }),
-      ].join("\n"),
-      "utf-8",
-    );
+    const root = await makeRoot("session-logs-invalid-limit");
+    await withStateDir(root, async () => {
+      writeTranscript({
+        sessionId: "sess-invalid-limit",
+        events: [
+          {
+            type: "message",
+            timestamp: new Date(Date.UTC(2026, 1, 12, 10, 0, 0)).toISOString(),
+            message: { role: "user", content: "hello" },
+          },
+          {
+            type: "message",
+            timestamp: new Date(Date.UTC(2026, 1, 12, 10, 1, 0)).toISOString(),
+            message: { role: "user", content: "world" },
+          },
+        ],
+      });
 
-    await expect(loadSessionLogs({ sessionFile, limit: 0 })).resolves.toEqual([]);
-    await expect(loadSessionLogs({ sessionFile, limit: -1 })).resolves.toEqual([]);
-    await expect(loadSessionLogs({ sessionFile, limit: Number.NaN })).resolves.toEqual([]);
-    await expect(
-      loadSessionLogs({ sessionFile, limit: Number.POSITIVE_INFINITY }),
-    ).resolves.toEqual([]);
+      await expect(loadSessionLogs({ sessionId: "sess-invalid-limit", limit: 0 })).resolves.toEqual(
+        [],
+      );
+      await expect(
+        loadSessionLogs({ sessionId: "sess-invalid-limit", limit: -1 }),
+      ).resolves.toEqual([]);
+      await expect(
+        loadSessionLogs({ sessionId: "sess-invalid-limit", limit: Number.NaN }),
+      ).resolves.toEqual([]);
+      await expect(
+        loadSessionLogs({ sessionId: "sess-invalid-limit", limit: Number.POSITIVE_INFINITY }),
+      ).resolves.toEqual([]);
+    });
   });
 });

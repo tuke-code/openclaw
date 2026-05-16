@@ -393,7 +393,7 @@ export const telegramBotDepsForTest: TelegramBotDeps = {
   listSessionEntries: listSessionEntriesMock,
   patchSessionEntry: patchSessionEntryMock,
   readSessionUpdatedAt: () => undefined,
-  recordInboundSession: recordInboundSessionMock as TelegramBotDeps["recordInboundSession"],
+  recordInboundSession: vi.fn() as TelegramBotDeps["recordInboundSession"],
   recordChannelActivity: vi.fn() as TelegramBotDeps["recordChannelActivity"],
   resolveInboundLastRouteSessionKey: ({ route, sessionKey }) =>
     route.lastRoutePolicy === "main" ? route.mainSessionKey : sessionKey,

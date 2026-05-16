@@ -6,6 +6,7 @@ import {
   authProfileStoreKey,
   savePersistedAuthProfileSecretsStore,
 } from "../agents/auth-profiles/persisted.js";
+import { resolveAuthProfileStoreLocationForDisplay } from "../agents/auth-profiles/paths.js";
 import { deleteAuthProfileStorePayload } from "../agents/auth-profiles/sqlite-storage.js";
 import type { AuthProfileCredential } from "../agents/auth-profiles/types.js";
 import { writeStoredModelsConfigRaw } from "../agents/models-config-store.js";
@@ -17,6 +18,7 @@ type AuditFixture = {
   configPath: string;
   agentDir: string;
   modelCatalogSource: string;
+  authStoreLocation: string;
   envPath: string;
   env: NodeJS.ProcessEnv;
 };
@@ -152,6 +154,9 @@ async function createAuditFixture(): Promise<AuditFixture> {
   const configPath = path.join(stateDir, "openclaw.json");
   const agentDir = path.join(stateDir, "agents", "main", "agent");
   const modelCatalogSource = `stored model catalog: ${agentDir}`;
+  const authStoreLocation = resolveAuthProfileStoreLocationForDisplay(agentDir, {
+    OPENCLAW_STATE_DIR: stateDir,
+  });
   const envPath = path.join(stateDir, ".env");
 
   await fs.mkdir(path.dirname(configPath), { recursive: true });
@@ -163,6 +168,7 @@ async function createAuditFixture(): Promise<AuditFixture> {
     configPath,
     agentDir,
     modelCatalogSource,
+    authStoreLocation,
     envPath,
     env: {
       OPENCLAW_STATE_DIR: stateDir,
@@ -583,14 +589,11 @@ describe("secrets audit", () => {
   });
 
   it("does not flag $VAR shorthand env refs in auth profiles as plaintext", async () => {
-    await writeJsonFile(fixture.authStorePath, {
-      version: 1,
-      profiles: {
-        "openai:default": {
-          type: "api_key",
-          provider: "openai",
-          key: "$OPENAI_API_KEY", // pragma: allowlist secret
-        },
+    writeAuthProfileStore(fixture, {
+      "openai:default": {
+        type: "api_key",
+        provider: "openai",
+        key: "$OPENAI_API_KEY", // pragma: allowlist secret
       },
     });
 
@@ -598,20 +601,17 @@ describe("secrets audit", () => {
     expect(
       hasFinding(
         report,
-        (entry) => entry.code === "PLAINTEXT_FOUND" && entry.file === fixture.authStorePath,
+        (entry) => entry.code === "PLAINTEXT_FOUND" && entry.file === fixture.authStoreLocation,
       ),
     ).toBe(false);
   });
 
   it("does not flag ${VAR} env refs in auth profiles as plaintext", async () => {
-    await writeJsonFile(fixture.authStorePath, {
-      version: 1,
-      profiles: {
-        "openai:default": {
-          type: "api_key",
-          provider: "openai",
-          key: "${OPENAI_API_KEY}", // pragma: allowlist secret
-        },
+    writeAuthProfileStore(fixture, {
+      "openai:default": {
+        type: "api_key",
+        provider: "openai",
+        key: "${OPENAI_API_KEY}", // pragma: allowlist secret
       },
     });
 
@@ -619,21 +619,18 @@ describe("secrets audit", () => {
     expect(
       hasFinding(
         report,
-        (entry) => entry.code === "PLAINTEXT_FOUND" && entry.file === fixture.authStorePath,
+        (entry) => entry.code === "PLAINTEXT_FOUND" && entry.file === fixture.authStoreLocation,
       ),
     ).toBe(false);
   });
 
   it("still flags auth profile plaintext when an explicit ref is also configured", async () => {
-    await writeJsonFile(fixture.authStorePath, {
-      version: 1,
-      profiles: {
-        "openai:default": {
-          type: "api_key",
-          provider: "openai",
-          key: "sk-leftover-plaintext", // pragma: allowlist secret
-          keyRef: { source: "env", id: "OPENAI_API_KEY" },
-        },
+    writeAuthProfileStore(fixture, {
+      "openai:default": {
+        type: "api_key",
+        provider: "openai",
+        key: "sk-leftover-plaintext", // pragma: allowlist secret
+        keyRef: { source: "env", provider: "default", id: "OPENAI_API_KEY" },
       },
     });
 
@@ -643,7 +640,7 @@ describe("secrets audit", () => {
         report,
         (entry) =>
           entry.code === "PLAINTEXT_FOUND" &&
-          entry.file === fixture.authStorePath &&
+          entry.file === fixture.authStoreLocation &&
           entry.jsonPath === "profiles.openai:default.key",
       ),
     ).toBe(true);
@@ -652,15 +649,12 @@ describe("secrets audit", () => {
   it.each(["$OPENAI_API_KEY", "${OPENAI_API_KEY}"])(
     "does not flag %s auth profile env refs when an explicit ref is also configured",
     async (value) => {
-      await writeJsonFile(fixture.authStorePath, {
-        version: 1,
-        profiles: {
-          "openai:default": {
-            type: "api_key",
-            provider: "openai",
-            key: value,
-            keyRef: { source: "env", id: "OPENAI_API_KEY" },
-          },
+      writeAuthProfileStore(fixture, {
+        "openai:default": {
+          type: "api_key",
+          provider: "openai",
+          key: value,
+          keyRef: { source: "env", provider: "default", id: "OPENAI_API_KEY" },
         },
       });
 
@@ -670,7 +664,7 @@ describe("secrets audit", () => {
           report,
           (entry) =>
             entry.code === "PLAINTEXT_FOUND" &&
-            entry.file === fixture.authStorePath &&
+            entry.file === fixture.authStoreLocation &&
             entry.jsonPath === "profiles.openai:default.key",
         ),
       ).toBe(false);
