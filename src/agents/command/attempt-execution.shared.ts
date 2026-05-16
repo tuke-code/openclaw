@@ -32,7 +32,7 @@ export async function persistSessionEntry(
     fallbackEntry: params.sessionStore?.[params.sessionKey] ?? params.entry,
     update: (existing) => {
       if (params.shouldPersist && !params.shouldPersist(existing)) {
-        return existing;
+        return null;
       }
       const merged = mergeSessionEntry(existing, params.entry);
       for (const field of params.clearedFields ?? []) {
@@ -43,10 +43,13 @@ export async function persistSessionEntry(
       return merged;
     },
   });
-  if (persisted && params.sessionStore) {
-    params.sessionStore[params.sessionKey] = persisted;
+  const nextEntry = persisted ?? undefined;
+  if (nextEntry && params.sessionStore) {
+    params.sessionStore[params.sessionKey] = nextEntry;
+  } else if (params.sessionStore) {
+    delete params.sessionStore[params.sessionKey];
   }
-  return persisted;
+  return nextEntry;
 }
 
 export function prependInternalEventContext(

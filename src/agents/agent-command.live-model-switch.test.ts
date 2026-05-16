@@ -1214,7 +1214,7 @@ describe("agentCommand – LiveSessionModelSwitchError retry", () => {
       );
     });
     expect(autoPinnedSwitchWrites).toHaveLength(0);
-    expectRecordFields(mockCallArg(state.updateSessionStoreAfterAgentRunMock), {
+    expectRecordFields(mockCallArg(state.updateSessionEntryAfterAgentRunMock), {
       fallbackProvider: "openai",
       fallbackModel: "gpt-5.4",
     });

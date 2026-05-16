@@ -1,7 +1,5 @@
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { withStateDirEnv } from "../../test-helpers/state-dir-env.js";
 import {
   INTERNAL_RUNTIME_CONTEXT_BEGIN,
   INTERNAL_RUNTIME_CONTEXT_END,
@@ -82,11 +80,9 @@ describe("attempt execution prompt materialization", () => {
 
 describe("persistSessionEntry", () => {
   it("clears stale local entries when guarded persistence sees no persisted entry", async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-session-store-"));
-    try {
-      const storePath = path.join(dir, "sessions.json");
+    await withStateDirEnv("openclaw-session-entry-persist-", async () => {
       const sessionStore = {
-        main: {
+        "agent:main": {
           sessionId: "stale",
           updatedAt: 1,
         },
@@ -94,19 +90,16 @@ describe("persistSessionEntry", () => {
 
       const persisted = await persistSessionEntry({
         sessionStore,
-        sessionKey: "main",
-        storePath,
+        sessionKey: "agent:main",
         entry: {
           sessionId: "stale",
           updatedAt: 2,
         },
-        shouldPersist: (entry) => Boolean(entry),
+        shouldPersist: (entry) => entry?.sessionId === "expected",
       });
 
       expect(persisted).toBeUndefined();
-      expect(sessionStore.main).toBeUndefined();
-    } finally {
-      fs.rmSync(dir, { recursive: true, force: true });
-    }
+      expect(sessionStore["agent:main"]).toBeUndefined();
+    });
   });
 });
