@@ -1273,7 +1273,6 @@ describe("runPreparedReply media-only handling", () => {
       await import("../../agents/auth-profiles/session-override.js");
     const sessionEntry: SessionEntry = {
       sessionId: "session-image-auth",
-      sessionFile: "/tmp/session-image-auth.jsonl",
       authProfileOverride: "anthropic:work",
       authProfileOverrideSource: "user",
       updatedAt: 1,
@@ -1283,7 +1282,6 @@ describe("runPreparedReply media-only handling", () => {
     };
     vi.mocked(resolveSessionAuthProfileOverride).mockImplementationOnce(async (params) => {
       expect(params.provider).toBe("openai");
-      expect(params.storePath).toBeUndefined();
       expect(params.sessionEntry).not.toBe(sessionEntry);
       expect(params.sessionStore).not.toBe(sessionStore);
       if (params.sessionEntry) {
@@ -1304,7 +1302,6 @@ describe("runPreparedReply media-only handling", () => {
         sessionId: "session-image-auth",
         sessionEntry,
         sessionStore,
-        storePath: "/tmp/sessions.json",
       }),
     );
 
@@ -1321,7 +1318,6 @@ describe("runPreparedReply media-only handling", () => {
       await import("../../agents/auth-profiles/session-override.js");
     const sessionEntry: SessionEntry = {
       sessionId: "session-image-default-provider-auth",
-      sessionFile: "/tmp/session-image-default-provider-auth.jsonl",
       providerOverride: "anthropic",
       modelOverride: "claude-opus-4-1",
       authProfileOverride: "anthropic:work",
@@ -1333,7 +1329,6 @@ describe("runPreparedReply media-only handling", () => {
     };
     vi.mocked(resolveSessionAuthProfileOverride).mockImplementationOnce(async (params) => {
       expect(params.provider).toBe("openai");
-      expect(params.storePath).toBeUndefined();
       expect(params.sessionEntry).not.toBe(sessionEntry);
       expect(params.sessionStore).not.toBe(sessionStore);
       if (params.sessionEntry) {
@@ -1354,7 +1349,6 @@ describe("runPreparedReply media-only handling", () => {
         sessionId: "session-image-default-provider-auth",
         sessionEntry,
         sessionStore,
-        storePath: "/tmp/sessions.json",
       }),
     );
 
@@ -1370,7 +1364,6 @@ describe("runPreparedReply media-only handling", () => {
       await import("../../agents/auth-profiles/session-override.js");
     const sessionEntry: SessionEntry = {
       sessionId: "session-image-runtime-provider-auth",
-      sessionFile: "/tmp/session-image-runtime-provider-auth.jsonl",
       modelProvider: "anthropic",
       model: "claude-opus-4-1",
       authProfileOverride: "anthropic:work",
@@ -1382,7 +1375,6 @@ describe("runPreparedReply media-only handling", () => {
     };
     vi.mocked(resolveSessionAuthProfileOverride).mockImplementationOnce(async (params) => {
       expect(params.provider).toBe("openai");
-      expect(params.storePath).toBeUndefined();
       expect(params.sessionEntry).not.toBe(sessionEntry);
       expect(params.sessionStore).not.toBe(sessionStore);
       if (params.sessionEntry) {
@@ -1404,7 +1396,6 @@ describe("runPreparedReply media-only handling", () => {
         sessionId: "session-image-runtime-provider-auth",
         sessionEntry,
         sessionStore,
-        storePath: "/tmp/sessions.json",
       }),
     );
 
