@@ -48,13 +48,79 @@ interface DeviceAuthTokenStore {
   )
 }
 
-class DeviceAuthStore(
+internal interface DeviceAuthStateStore {
+  fun readDeviceAuthToken(
+    deviceId: String,
+    role: String,
+  ): OpenClawSQLiteDeviceAuthTokenRow?
+
+  fun readLatestDeviceAuthDeviceId(): String?
+
+  fun upsertDeviceAuthToken(row: OpenClawSQLiteDeviceAuthTokenRow)
+
+  fun deleteDeviceAuthToken(
+    deviceId: String,
+    role: String,
+  )
+
+  fun deleteAllDeviceAuthTokens()
+}
+
+private class OpenClawSQLiteDeviceAuthStateStore(
+  private val store: OpenClawSQLiteStateStore,
+) : DeviceAuthStateStore {
+  override fun readDeviceAuthToken(
+    deviceId: String,
+    role: String,
+  ): OpenClawSQLiteDeviceAuthTokenRow? = store.readDeviceAuthToken(deviceId, role)
+
+  override fun readLatestDeviceAuthDeviceId(): String? = store.readLatestDeviceAuthDeviceId()
+
+  override fun upsertDeviceAuthToken(row: OpenClawSQLiteDeviceAuthTokenRow) {
+    store.upsertDeviceAuthToken(row)
+  }
+
+  override fun deleteDeviceAuthToken(
+    deviceId: String,
+    role: String,
+  ) {
+    store.deleteDeviceAuthToken(deviceId, role)
+  }
+
+  override fun deleteAllDeviceAuthTokens() {
+    store.deleteAllDeviceAuthTokens()
+  }
+}
+
+class DeviceAuthStore private constructor(
   private val context: Context,
   private val legacyPrefsOverride: SecurePrefs? = null,
+  private val stateStore: DeviceAuthStateStore,
 ) : DeviceAuthTokenStore {
+  constructor(
+    context: Context,
+    legacyPrefsOverride: SecurePrefs? = null,
+  ) : this(
+    context = context,
+    legacyPrefsOverride = legacyPrefsOverride,
+    stateStore = OpenClawSQLiteDeviceAuthStateStore(OpenClawSQLiteStateStore(context)),
+  )
+
+  internal companion object {
+    fun createForTesting(
+      context: Context,
+      legacyPrefsOverride: SecurePrefs? = null,
+      stateStoreOverride: DeviceAuthStateStore,
+    ): DeviceAuthStore =
+      DeviceAuthStore(
+        context = context,
+        legacyPrefsOverride = legacyPrefsOverride,
+        stateStore = stateStoreOverride,
+      )
+  }
+
   private val json = Json { ignoreUnknownKeys = true }
   private val legacyPrefs by lazy { legacyPrefsOverride ?: SecurePrefs(context) }
-  private val stateStore = OpenClawSQLiteStateStore(context)
 
   override fun loadEntry(
     deviceId: String,
@@ -150,17 +216,22 @@ class DeviceAuthStore(
         scopes = normalizeScopes(metadata?.scopes ?: emptyList()),
         updatedAtMs = metadata?.updatedAtMs?.takeIf { it > 0L } ?: System.currentTimeMillis(),
       )
-    stateStore.upsertDeviceAuthToken(
-      OpenClawSQLiteDeviceAuthTokenRow(
-        deviceId = normalizedDevice,
-        role = normalizedRole,
-        token = sqliteSecurePrefsTokenMarker,
-        scopesJson = json.encodeToString(entry.scopes),
-        updatedAtMs = entry.updatedAtMs,
-      ),
-    )
-    legacyPrefs.putString(tokenKey(normalizedDevice, normalizedRole), entry.token)
-    removeLegacyMetadata(normalizedDevice, normalizedRole)
+    val migrated =
+      runCatching {
+        stateStore.upsertDeviceAuthToken(
+          OpenClawSQLiteDeviceAuthTokenRow(
+            deviceId = normalizedDevice,
+            role = normalizedRole,
+            token = sqliteSecurePrefsTokenMarker,
+            scopesJson = json.encodeToString(entry.scopes),
+            updatedAtMs = entry.updatedAtMs,
+          ),
+        )
+      }.isSuccess
+    if (migrated) {
+      legacyPrefs.putString(tokenKey(normalizedDevice, normalizedRole), entry.token)
+      removeLegacyMetadata(normalizedDevice, normalizedRole)
+    }
     return entry
   }
 

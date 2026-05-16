@@ -84,6 +84,28 @@ class DeviceAuthStoreTest {
   }
 
   @Test
+  fun loadEntryReturnsLegacySecurePrefsTokenWhenSQLiteMigrationFails() {
+    val app = RuntimeEnvironment.getApplication()
+    val prefs = legacyPrefs(app)
+    val metadata = """{"scopes":["operator.read"],"updatedAtMs":1700000000000}"""
+    prefs.putString("gateway.deviceToken.device-1.operator", " operator-token ")
+    prefs.putString("gateway.deviceTokenMeta.device-1.operator", metadata)
+
+    val entry =
+      DeviceAuthStore.createForTesting(
+        context = app,
+        legacyPrefsOverride = prefs,
+        stateStoreOverride = ThrowingDeviceAuthStateStore(),
+      ).loadEntry("device-1", "operator")
+
+    assertEquals("operator-token", entry?.token)
+    assertEquals(listOf("operator.read"), entry?.scopes)
+    assertEquals(1700000000000L, entry?.updatedAtMs)
+    assertEquals(" operator-token ", prefs.getString("gateway.deviceToken.device-1.operator"))
+    assertEquals(metadata, prefs.getString("gateway.deviceTokenMeta.device-1.operator"))
+  }
+
+  @Test
   fun loadEntryMovesPlaintextSqliteTokenBackToSecurePrefs() {
     val app = RuntimeEnvironment.getApplication()
     val prefs = legacyPrefs(app)
@@ -131,5 +153,25 @@ class DeviceAuthStoreTest {
     val prefs = context.getSharedPreferences("openclaw.node.secure.test", Context.MODE_PRIVATE)
     prefs.edit().clear().commit()
     return SecurePrefs(context, securePrefsOverride = prefs)
+  }
+
+  private class ThrowingDeviceAuthStateStore : DeviceAuthStateStore {
+    override fun readDeviceAuthToken(
+      deviceId: String,
+      role: String,
+    ): OpenClawSQLiteDeviceAuthTokenRow? = null
+
+    override fun readLatestDeviceAuthDeviceId(): String? = null
+
+    override fun upsertDeviceAuthToken(row: OpenClawSQLiteDeviceAuthTokenRow) {
+      error("sqlite unavailable")
+    }
+
+    override fun deleteDeviceAuthToken(
+      deviceId: String,
+      role: String,
+    ) = Unit
+
+    override fun deleteAllDeviceAuthTokens() = Unit
   }
 }
