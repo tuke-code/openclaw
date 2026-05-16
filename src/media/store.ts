@@ -319,6 +319,11 @@ export function getMediaMaterializationDir() {
   return resolveMediaMaterializationRoot();
 }
 
+/** @deprecated Use getMediaMaterializationDir. */
+export function getMediaDir() {
+  return getMediaMaterializationDir();
+}
+
 export async function ensureMediaDir() {
   const mediaDir = resolveMediaMaterializationRoot();
   await fs.mkdir(mediaDir, { recursive: true, mode: 0o700 });

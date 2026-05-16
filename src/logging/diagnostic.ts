@@ -1,6 +1,6 @@
 import { monitorEventLoopDelay, performance } from "node:perf_hooks";
 import { getRuntimeConfig } from "../config/config.js";
-import { resolveAllAgentSessionStoreTargetsSync } from "../config/sessions/targets.js";
+import { resolveAllAgentSessionDatabaseTargetsSync } from "../config/sessions/targets.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import {
   areDiagnosticsEnabledForProcess,
@@ -133,7 +133,9 @@ function resolveDiagnosticSessionStorePaths(config?: OpenClawConfig): string[] |
     return undefined;
   }
   try {
-    const paths = resolveAllAgentSessionStoreTargetsSync(config).map((target) => target.storePath);
+    const paths = resolveAllAgentSessionDatabaseTargetsSync(config).map(
+      (target) => target.databasePath,
+    );
     return paths.length > 0 ? paths : undefined;
   } catch {
     return undefined;

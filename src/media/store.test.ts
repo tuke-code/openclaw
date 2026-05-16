@@ -31,6 +31,10 @@ describe("media store", () => {
     vi.restoreAllMocks();
   });
 
+  it("keeps the legacy media directory export as an alias", () => {
+    expect(store.getMediaDir()).toBe(store.getMediaMaterializationDir());
+  });
+
   async function withTempStore<T>(
     fn: (store: typeof import("./store.js"), home: string) => Promise<T>,
   ): Promise<T> {
