@@ -881,20 +881,19 @@ describe("searchMemoryWiki", () => {
         search: { backend: "shared", corpus: "memory" },
       },
     });
-    loadCombinedSessionStoreForGatewayMock.mockReturnValue({
-      storePath: "(test)",
-      store: {
+    loadCombinedSessionEntriesForGatewayMock.mockReturnValue({
+      databasePath: "(test)",
+      entries: {
         "agent:secondary:visible-session": {
           sessionId: "visible-session",
           updatedAt: 1,
-          sessionFile: "/tmp/openclaw/visible-session.jsonl",
         },
       },
     });
     const manager = createMemoryManager({
       searchResults: [
         {
-          path: "sessions/visible-session.jsonl",
+          path: "transcript:secondary:visible-session",
           startLine: 1,
           endLine: 2,
           score: 30,
@@ -902,7 +901,7 @@ describe("searchMemoryWiki", () => {
           source: "sessions",
         },
         {
-          path: "sessions/other-session.jsonl",
+          path: "transcript:secondary:other-session",
           startLine: 3,
           endLine: 4,
           score: 20,
@@ -929,11 +928,11 @@ describe("searchMemoryWiki", () => {
       maxResults: 10,
     });
 
-    expect(loadCombinedSessionStoreForGatewayMock).toHaveBeenCalledWith(createAppConfig(), {
+    expect(loadCombinedSessionEntriesForGatewayMock).toHaveBeenCalledWith(createAppConfig(), {
       agentId: "secondary",
     });
     expect(results.map((result) => result.path)).toEqual([
-      "sessions/visible-session.jsonl",
+      "transcript:secondary:visible-session",
       "MEMORY.md",
     ]);
   });
@@ -951,20 +950,19 @@ describe("searchMemoryWiki", () => {
         list: [{ id: "main", default: true }, { id: "secondary" }],
       },
     } as OpenClawConfig;
-    loadCombinedSessionStoreForGatewayMock.mockReturnValue({
-      storePath: "(test)",
-      store: {
+    loadCombinedSessionEntriesForGatewayMock.mockReturnValue({
+      databasePath: "(test)",
+      entries: {
         global: {
           sessionId: "visible-session",
           updatedAt: 1,
-          sessionFile: "/tmp/openclaw/visible-session.jsonl",
         },
       },
     });
     const manager = createMemoryManager({
       searchResults: [
         {
-          path: "sessions/visible-session.jsonl",
+          path: "transcript:secondary:visible-session",
           startLine: 1,
           endLine: 2,
           score: 30,
@@ -992,26 +990,31 @@ describe("searchMemoryWiki", () => {
     });
 
     expect(results.map((result) => result.path)).toEqual([
-      "sessions/visible-session.jsonl",
+      "transcript:secondary:visible-session",
       "MEMORY.md",
     ]);
   });
 
-  it("keeps gateway-style archived session memory hits when the path owner matches agent scope", async () => {
+  it("keeps gateway-style session memory hits when the path owner matches agent scope", async () => {
     const { config } = await createQueryVault({
       initialize: true,
       config: {
         search: { backend: "shared", corpus: "memory" },
       },
     });
-    loadCombinedSessionStoreForGatewayMock.mockReturnValue({
-      storePath: "(test)",
-      store: {},
+    loadCombinedSessionEntriesForGatewayMock.mockReturnValue({
+      databasePath: "(test)",
+      entries: {
+        "agent:secondary:deleted-stem": {
+          sessionId: "deleted-stem",
+          updatedAt: 1,
+        },
+      },
     });
     const manager = createMemoryManager({
       searchResults: [
         {
-          path: "sessions/secondary/deleted-stem.jsonl.deleted.2026-02-16T22-27-33.000Z",
+          path: "transcript:secondary:deleted-stem",
           startLine: 1,
           endLine: 2,
           score: 30,
@@ -1039,7 +1042,7 @@ describe("searchMemoryWiki", () => {
     });
 
     expect(results.map((result) => result.path)).toEqual([
-      "sessions/secondary/deleted-stem.jsonl.deleted.2026-02-16T22-27-33.000Z",
+      "transcript:secondary:deleted-stem",
       "MEMORY.md",
     ]);
   });
@@ -1051,20 +1054,19 @@ describe("searchMemoryWiki", () => {
         search: { backend: "shared", corpus: "memory" },
       },
     });
-    loadCombinedSessionStoreForGatewayMock.mockReturnValue({
-      storePath: "(test)",
-      store: {
+    loadCombinedSessionEntriesForGatewayMock.mockReturnValue({
+      databasePath: "(test)",
+      entries: {
         "agent:secondary:main": {
           sessionId: "main",
           updatedAt: 1,
-          sessionFile: "/tmp/openclaw/main.jsonl",
         },
       },
     });
     const manager = createMemoryManager({
       searchResults: [
         {
-          path: "sessions/other/main.jsonl",
+          path: "transcript:other:main",
           startLine: 1,
           endLine: 2,
           score: 30,
@@ -1101,20 +1103,19 @@ describe("searchMemoryWiki", () => {
         search: { backend: "shared", corpus: "memory" },
       },
     });
-    loadCombinedSessionStoreForGatewayMock.mockReturnValue({
-      storePath: "(test)",
-      store: {
+    loadCombinedSessionEntriesForGatewayMock.mockReturnValue({
+      databasePath: "(test)",
+      entries: {
         "agent:other:visible-session": {
           sessionId: "visible-session",
           updatedAt: 1,
-          sessionFile: "/tmp/openclaw/visible-session.jsonl",
         },
       },
     });
     const manager = createMemoryManager({
       searchResults: [
         {
-          path: "sessions/visible-session.jsonl",
+          path: "transcript:secondary:visible-session",
           startLine: 1,
           endLine: 2,
           score: 30,

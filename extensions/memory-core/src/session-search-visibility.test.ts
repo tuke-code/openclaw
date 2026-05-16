@@ -4,13 +4,18 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { filterMemorySearchHitsBySessionVisibility } from "./session-search-visibility.js";
 import { asOpenClawConfig } from "./tools.test-helpers.js";
 
-const crossAgentStore = {
+type TestSessionEntry = {
+  sessionId: string;
+  updatedAt: number;
+};
+
+const crossAgentStore: Record<string, TestSessionEntry> = {
   "agent:peer:only": {
     sessionId: "w1",
     updatedAt: 1,
   },
 };
-let combinedSessionEntries: typeof crossAgentStore | Record<string, never> = crossAgentStore;
+let combinedSessionEntries: Record<string, TestSessionEntry> = crossAgentStore;
 
 vi.mock("openclaw/plugin-sdk/session-transcript-hit", async (importOriginal) => {
   const actual =

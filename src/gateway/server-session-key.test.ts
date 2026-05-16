@@ -60,9 +60,7 @@ describe("resolveSessionKeyForRun", () => {
 
   it("uses the requested agent scope for run lookups", () => {
     const cfg: OpenClawConfig = {
-      session: {
-        store: "/custom/root/agents/{agentId}/sessions/sessions.json",
-      },
+      session: {},
     };
     hoisted.loadConfigMock.mockReturnValue(cfg);
     hoisted.loadCombinedSessionEntriesForGatewayMock.mockReturnValue({
@@ -80,9 +78,7 @@ describe("resolveSessionKeyForRun", () => {
 
   it("defaults run id lookups without explicit agent scope to the default agent", () => {
     const cfg: OpenClawConfig = {
-      session: {
-        store: "/custom/root/agents/{agentId}/sessions/sessions.json",
-      },
+      session: {},
     };
     hoisted.loadConfigMock.mockReturnValue(cfg);
     hoisted.loadCombinedSessionEntriesForGatewayMock.mockReturnValue({
@@ -100,9 +96,7 @@ describe("resolveSessionKeyForRun", () => {
 
   it("filters same-run matches by requested agent for shared stores", () => {
     const cfg: OpenClawConfig = {
-      session: {
-        store: "/custom/root/sessions/sessions.json",
-      },
+      session: {},
     };
     hoisted.loadConfigMock.mockReturnValue(cfg);
     hoisted.loadCombinedSessionEntriesForGatewayMock.mockReturnValue({

@@ -82,11 +82,11 @@ import {
 } from "../session-compaction-checkpoints.js";
 import { triggerSessionPatchHook } from "../session-patch-hooks.js";
 import {
-  resolveSessionStoreAgentId,
-  resolveSessionStoreKey,
-  resolveStoredSessionKeyForAgentStore,
+  resolveSessionRowAgentId,
+  resolveSessionRowKey,
+  resolveStoredSessionRowKeyForAgent,
   resolveStoredSessionOwnerAgentId,
-} from "../session-store-key.js";
+} from "../session-row-key.js";
 import { reactivateCompletedSubagentSession } from "../session-subagent-reactivation.js";
 import {
   buildGatewaySessionRow,
@@ -556,8 +556,8 @@ function resolveSessionKeyAgentId(
   if (!parseAgentSessionKey(key) && key.toLowerCase().startsWith("agent:")) {
     return undefined;
   }
-  const canonicalKey = resolveSessionStoreKey({ cfg, sessionKey: key });
-  return resolveSessionStoreAgentId(cfg, canonicalKey);
+  const canonicalKey = resolveSessionRowKey({ cfg, sessionKey: key });
+  return resolveSessionRowAgentId(cfg, canonicalKey);
 }
 
 function sessionKeyBelongsToAgent(
@@ -595,7 +595,7 @@ function resolveScopedAbortKey(params: {
   if (ownerAgentId && ownerAgentId !== scopedAgentId) {
     return undefined;
   }
-  return resolveStoredSessionKeyForAgentStore({
+  return resolveStoredSessionRowKeyForAgent({
     cfg: params.cfg,
     agentId: scopedAgentId,
     sessionKey: key,

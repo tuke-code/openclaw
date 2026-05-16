@@ -196,7 +196,7 @@ describe("deliverMattermostReplyPayload", () => {
           path.join(stateDir, "workspace"),
           path.join(stateDir, "sandboxes"),
           path.join(stateDir, `workspace-${agentId}`),
-        ],
+        ]),
       });
     } finally {
       if (previousStateDir === undefined) {
