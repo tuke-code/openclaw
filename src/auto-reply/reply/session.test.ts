@@ -3197,10 +3197,9 @@ describe("persistSessionUsageUpdate", () => {
   });
 
   it("preserves the displayed session model when heartbeat usage uses a heartbeat model", async () => {
-    const storePath = await createStorePath("openclaw-usage-heartbeat-model-");
+    const sessionRowsTarget = await createSessionRowsTarget("openclaw-usage-heartbeat-model-");
     const sessionKey = "main";
     await seedSessionStore({
-      storePath,
       sessionKey,
       entry: {
         sessionId: "s1",
@@ -3211,7 +3210,6 @@ describe("persistSessionUsageUpdate", () => {
     });
 
     await persistSessionUsageUpdate({
-      storePath,
       sessionKey,
       isHeartbeat: true,
       usage: { input: 1_200, output: 100, cacheRead: 300, cacheWrite: 10 },
@@ -3221,7 +3219,7 @@ describe("persistSessionUsageUpdate", () => {
       contextTokensUsed: 128_000,
     });
 
-    const stored = JSON.parse(await fs.readFile(storePath, "utf-8"));
+    const stored = readSessionRowsForFixtureTarget(sessionRowsTarget);
     expect(stored[sessionKey].modelProvider).toBe("openai-codex");
     expect(stored[sessionKey].model).toBe("gpt-5.4");
     expect(stored[sessionKey].inputTokens).toBe(1_200);
