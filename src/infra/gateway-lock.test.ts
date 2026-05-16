@@ -243,6 +243,7 @@ describe("gateway lock", () => {
     const { legacyLockPath } = resolveLegacyLockIdentity(env);
     const lock = expectGatewayLock(await acquireForTest(env));
 
+    expect(path.basename(legacyLockPath)).toMatch(/^gateway\.[a-f0-9]{8}\.lock$/u);
     const stat = await fs.stat(legacyLockPath);
     expect(stat.isFile()).toBe(true);
 

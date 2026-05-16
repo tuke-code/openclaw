@@ -100,6 +100,7 @@ export type BackupCreateResult = {
     reason: string;
     coveredBy?: string;
   }>;
+  skippedVolatileCount: number;
 };
 
 async function resolveOutputPath(params: {
@@ -381,6 +382,13 @@ export function formatBackupCreateSummary(result: BackupCreateResult): string[] 
     lines.push("Dry run only; archive was not written.");
   } else {
     lines.push(`Created ${result.archivePath}`);
+    if (result.skippedVolatileCount > 0) {
+      lines.push(
+        `Skipped ${result.skippedVolatileCount} volatile file${
+          result.skippedVolatileCount === 1 ? "" : "s"
+        } (live sessions, cron logs, queues, sockets, pid/tmp).`,
+      );
+    }
     if (result.verified) {
       lines.push("Archive verification: passed");
     }
@@ -427,6 +435,7 @@ export function buildExtensionsNodeModulesFilter(stateDir: string): (filePath: s
 type StagedBackupAssets = {
   archivePaths: string[];
   databaseSnapshots: BackupManifestDatabaseSnapshot[];
+  skippedVolatileCount: number;
   state?: {
     asset: BackupAsset;
     stagedPath: string;
@@ -520,6 +529,7 @@ async function stageBackupAssets(params: {
 }): Promise<StagedBackupAssets> {
   const archivePaths: string[] = [];
   const databaseSnapshots: BackupManifestDatabaseSnapshot[] = [];
+  let skippedVolatileCount = 0;
   let stagedState: StagedBackupAssets["state"];
 
   for (const asset of params.assets) {
@@ -533,10 +543,16 @@ async function stageBackupAssets(params: {
     await fs.cp(asset.sourcePath, stagedPath, {
       recursive: true,
       verbatimSymlinks: true,
-      filter: (source) =>
-        !isSqliteDatabasePath(source) &&
-        !isSqliteSidecarPath(source) &&
-        !isVolatileBackupPath(source, volatilePlan),
+      filter: (source) => {
+        if (isSqliteDatabasePath(source) || isSqliteSidecarPath(source)) {
+          return false;
+        }
+        if (isVolatileBackupPath(source, volatilePlan)) {
+          skippedVolatileCount += 1;
+          return false;
+        }
+        return true;
+      },
     });
 
     for (const sqlitePath of await listSqliteDatabasePaths(asset.sourcePath)) {
@@ -563,7 +579,7 @@ async function stageBackupAssets(params: {
     archivePaths.push(stagedPath);
   }
 
-  return { archivePaths, databaseSnapshots, state: stagedState };
+  return { archivePaths, databaseSnapshots, skippedVolatileCount, state: stagedState };
 }
 
 export async function createBackupArchive(
@@ -614,6 +630,7 @@ export async function createBackupArchive(
     verified: false,
     assets: plan.included,
     skipped: plan.skipped,
+    skippedVolatileCount: 0,
   };
 
   if (opts.dryRun) {
@@ -632,6 +649,7 @@ export async function createBackupArchive(
       assets: result.assets,
       tempDir,
     });
+    result.skippedVolatileCount = stagedAssets.skippedVolatileCount;
     manifest = buildManifest({
       createdAt,
       archiveRoot,

@@ -307,7 +307,7 @@ function resolveLegacyGatewayLockPath(env: NodeJS.ProcessEnv, lockDir?: string) 
   const hash = createHash("sha256").update(configPath).digest("hex").slice(0, 8);
   const directory = lockDir ?? resolveLegacyGatewayLockDir();
   return {
-    legacyLockPath: path.join(directory, `gateway-${hash}.lock`),
+    legacyLockPath: path.join(directory, `gateway.${hash}.lock`),
     configPath,
   };
 }

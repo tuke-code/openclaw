@@ -30,6 +30,7 @@ function makeResult(overrides: Partial<BackupCreateResult> = {}): BackupCreateRe
     verified: false,
     assets: [],
     skipped: [],
+    skippedVolatileCount: 0,
     ...overrides,
   };
 }
@@ -283,6 +284,7 @@ describe("createBackupArchive", () => {
         expect(entries.some((entry) => entry.endsWith("/state/sessions/s-abc/meta.json"))).toBe(
           true,
         );
+        expect(result.skippedVolatileCount).toBe(4);
       },
     );
   });
