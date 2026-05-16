@@ -88,7 +88,7 @@ describe("withOpenClawStateLock", () => {
       const firstEntered = new Promise<void>((resolve) => {
         first = withOpenClawStateLock(
           "shared",
-          { path: dbPath, stale: 30, retries: FAST_RETRY },
+          { path: dbPath, stale: 200, retries: FAST_RETRY },
           async () => {
             order.push("first-enter");
             resolve();
@@ -99,16 +99,16 @@ describe("withOpenClawStateLock", () => {
       });
 
       await firstEntered;
-      await new Promise((resolve) => setTimeout(resolve, 75));
+      await new Promise((resolve) => setTimeout(resolve, 450));
       const second = withOpenClawStateLock(
         "shared",
-        { path: dbPath, stale: 30, retries: FAST_RETRY },
+        { path: dbPath, stale: 200, retries: FAST_RETRY },
         async () => {
           order.push("second-enter");
         },
       );
 
-      await new Promise((resolve) => setTimeout(resolve, 20));
+      await new Promise((resolve) => setTimeout(resolve, 50));
       expect(order).toEqual(["first-enter"]);
 
       releaseFirst();
