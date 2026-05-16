@@ -225,9 +225,9 @@ describe("heartbeat runner skips when target session lane is busy", () => {
   });
 
   it("returns requests-in-flight when the target session has an active reply run", async () => {
-    await withTempHeartbeatSandbox(async ({ storePath, replySpy }) => {
+    await withTempHeartbeatSandbox(async ({ agentId, replySpy }) => {
       const cfg = createHeartbeatTelegramConfig();
-      const sessionKey = await seedHeartbeatTelegramSession(storePath, cfg);
+      const sessionKey = await seedHeartbeatTelegramSession(agentId, cfg);
       const isReplyRunActive = vi.fn((key: string) => key === sessionKey);
 
       const result = await runHeartbeatOnce({
