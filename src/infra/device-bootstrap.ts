@@ -34,6 +34,10 @@ export type DeviceBootstrapTokenRecord = {
 };
 
 export type DeviceBootstrapState = Record<string, DeviceBootstrapTokenRecord>;
+type DevicePairingPendingBootstrapCheck = {
+  deviceId?: string;
+  publicKey?: string;
+};
 
 const withLock = createAsyncLock();
 const log = createSubsystemLogger("device-bootstrap");
@@ -82,19 +86,6 @@ function resolveRequestedBootstrapProfile(params: {
     roles: [params.role],
     scopes: resolveBootstrapProfileScopesForRole(params.role, params.scopes),
   });
-}
-
-function sameBootstrapProfile(
-  left: DeviceBootstrapProfile,
-  right: DeviceBootstrapProfile,
-): boolean {
-  if (left.roles.length !== right.roles.length || left.scopes.length !== right.scopes.length) {
-    return false;
-  }
-  return (
-    left.roles.every((role, index) => role === right.roles[index]) &&
-    left.scopes.every((scope, index) => scope === right.scopes[index])
-  );
 }
 
 function resolveIssuedBootstrapProfile(params: {
@@ -185,6 +176,24 @@ function normalizeBootstrapPublicKey(publicKey: string): string {
     return normalizeDevicePublicKeyBase64Url(trimmed) ?? trimmed;
   }
   return trimmed;
+}
+
+function hasPendingPairingForBoundBootstrapDevice(params: {
+  baseDir?: string;
+  deviceId: string;
+  publicKey: string;
+}): boolean {
+  const pending = readPairingStateRecord<DevicePairingPendingBootstrapCheck>({
+    baseDir: params.baseDir,
+    subdir: "devices",
+    key: "pending",
+  });
+  return Object.values(pending).some(
+    (request) =>
+      request.deviceId?.trim() === params.deviceId &&
+      typeof request.publicKey === "string" &&
+      normalizeBootstrapPublicKey(request.publicKey) === params.publicKey,
+  );
 }
 
 async function loadState(baseDir?: string): Promise<DeviceBootstrapState> {
@@ -464,7 +473,18 @@ export async function verifyDeviceBootstrapToken(params: {
         return { ok: false, reason: "bootstrap_token_invalid" };
       }
       const pendingProfile = resolvePersistedPendingProfile(record);
-      if (pendingProfile && !sameBootstrapProfile(pendingProfile, requestedProfile)) {
+      if (
+        pendingProfile &&
+        !bootstrapProfileSatisfiesProfile({
+          actualProfile: pendingProfile,
+          requiredProfile: requestedProfile,
+        }) &&
+        !hasPendingPairingForBoundBootstrapDevice({
+          baseDir: params.baseDir,
+          deviceId,
+          publicKey,
+        })
+      ) {
         return { ok: false, reason: "bootstrap_token_invalid" };
       }
       state[tokenKey] = {
