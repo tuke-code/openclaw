@@ -26,7 +26,7 @@ public enum DeviceAuthStore {
     public static func loadToken(deviceId: String, role: String) -> DeviceAuthEntry? {
         let role = self.normalizeRole(role)
         guard let row = OpenClawSQLiteStateStore.readDeviceAuthToken(deviceId: deviceId, role: role)
-        else { return self.importLegacyTokenIfNeeded(deviceId: deviceId, role: role) }
+        else { return self.loadLegacyTokenIfNoSQLiteAuthRows(deviceId: deviceId, role: role) }
         return self.entry(from: row)
     }
 
@@ -120,6 +120,14 @@ public enum DeviceAuthStore {
               let decoded = try? JSONDecoder().decode([String].self, from: data)
         else { return [] }
         return decoded
+    }
+
+    private static func loadLegacyTokenIfNoSQLiteAuthRows(deviceId: String, role: String) -> DeviceAuthEntry? {
+        guard OpenClawSQLiteStateStore.readLatestDeviceAuthDeviceId() == nil else {
+            self.removeLegacyToken(deviceId: deviceId, role: role)
+            return nil
+        }
+        return self.importLegacyTokenIfNeeded(deviceId: deviceId, role: role)
     }
 
     private static func legacyFileURL() -> URL {

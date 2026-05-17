@@ -84,6 +84,25 @@ class DeviceAuthStoreTest {
   }
 
   @Test
+  fun loadEntryDoesNotResurrectLegacyRoleAfterSQLiteRowsExist() {
+    val app = RuntimeEnvironment.getApplication()
+    val prefs = legacyPrefs(app)
+    prefs.putString("gateway.deviceToken.device-1.admin", " stale-admin-token ")
+    prefs.putString(
+      "gateway.deviceTokenMeta.device-1.admin",
+      """{"scopes":["admin"],"updatedAtMs":1700000000000}""",
+    )
+    val store = DeviceAuthStore(app, legacyPrefsOverride = prefs)
+
+    store.saveToken("device-1", "operator", "operator-token", scopes = listOf("operator.write"))
+
+    assertNull(store.loadEntry("device-1", "admin"))
+    assertNull(OpenClawSQLiteStateStore(app).readDeviceAuthToken("device-1", "admin"))
+    assertNull(prefs.getString("gateway.deviceToken.device-1.admin"))
+    assertNull(prefs.getString("gateway.deviceTokenMeta.device-1.admin"))
+  }
+
+  @Test
   fun loadEntryReturnsLegacySecurePrefsTokenWhenSQLiteMigrationFails() {
     val app = RuntimeEnvironment.getApplication()
     val prefs = legacyPrefs(app)

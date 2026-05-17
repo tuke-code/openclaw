@@ -158,6 +158,29 @@ struct DeviceIdentityStoreTests {
         }
     }
 
+    @Test("does not resurrect legacy device auth role after SQLite rows exist")
+    func doesNotResurrectLegacyDeviceAuthRoleAfterSQLiteRowsExist() throws {
+        try Self.withTempStateDir { stateDir in
+            let legacyURL = Self.legacyAuthURL(stateDir: stateDir)
+            try Self.writeLegacyAuthSidecar(
+                legacyURL,
+                deviceId: "device-1",
+                role: "admin",
+                token: "stale-admin-token",
+                scopes: ["admin"])
+
+            _ = DeviceAuthStore.storeToken(
+                deviceId: "device-1",
+                role: "operator",
+                token: "operator-token",
+                scopes: ["operator"])
+
+            #expect(DeviceAuthStore.loadToken(deviceId: "device-1", role: "admin") == nil)
+            #expect(OpenClawSQLiteStateStore.readDeviceAuthToken(deviceId: "device-1", role: "admin") == nil)
+            #expect(!FileManager.default.fileExists(atPath: legacyURL.path))
+        }
+    }
+
     @Test("keeps legacy device auth sidecar when SQLite import fails")
     func keepsLegacyDeviceAuthSidecarWhenSQLiteImportFails() throws {
         try Self.withTempStateDir { stateDir in
@@ -298,6 +321,7 @@ struct DeviceIdentityStoreTests {
     private static func writeLegacyAuthSidecar(
         _ legacyURL: URL,
         deviceId: String,
+        role: String = "gateway",
         token: String,
         scopes: [String]) throws
     {
@@ -308,9 +332,9 @@ struct DeviceIdentityStoreTests {
             "version": 1,
             "deviceId": deviceId,
             "tokens": [
-                "gateway": [
+                role: [
                     "token": token,
-                    "role": "gateway",
+                    "role": role,
                     "scopes": scopes,
                     "updatedAtMs": 1_700_000_000_000,
                 ],

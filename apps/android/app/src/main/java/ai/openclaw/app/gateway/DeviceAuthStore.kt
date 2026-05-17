@@ -130,7 +130,7 @@ class DeviceAuthStore private constructor(
     val normalizedRole = normalizeRole(role)
     val row =
       stateStore.readDeviceAuthToken(normalizedDevice, normalizedRole)
-        ?: return migrateLegacyEntry(normalizedDevice, normalizedRole)
+        ?: return migrateLegacyEntryIfNoSqliteAuthRows(normalizedDevice, normalizedRole)
     val token =
       legacyPrefs
         .getString(tokenKey(normalizedDevice, normalizedRole))
@@ -193,6 +193,17 @@ class DeviceAuthStore private constructor(
       role = normalizeRole(role),
     )
     removeLegacyEntry(normalizeDeviceId(deviceId), normalizeRole(role))
+  }
+
+  private fun migrateLegacyEntryIfNoSqliteAuthRows(
+    normalizedDevice: String,
+    normalizedRole: String,
+  ): DeviceAuthEntry? {
+    if (stateStore.readLatestDeviceAuthDeviceId() != null) {
+      removeLegacyEntry(normalizedDevice, normalizedRole)
+      return null
+    }
+    return migrateLegacyEntry(normalizedDevice, normalizedRole)
   }
 
   private fun migrateLegacyEntry(
