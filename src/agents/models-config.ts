@@ -18,7 +18,10 @@ import { MODEL_CATALOG_STATE } from "./models-config-state.js";
 import { readStoredModelsConfigRaw, writeStoredModelsConfigRaw } from "./models-config-store.js";
 import { planOpenClawModelCatalog } from "./models-config.plan.js";
 
-export { resetModelCatalogReadyCacheForTest } from "./models-config-state.js";
+export {
+  resetModelCatalogReadyCacheForTest,
+  resetModelCatalogReadyCacheForTest as resetModelsJsonReadyCacheForTest,
+} from "./models-config-state.js";
 
 function stableStringify(value: unknown): string {
   if (value === null || typeof value !== "object") {
@@ -260,3 +263,5 @@ export async function ensureOpenClawModelCatalog(
     throw error;
   }
 }
+
+export const ensureOpenClawModelsJson = ensureOpenClawModelCatalog;
