@@ -438,7 +438,7 @@ describe("media store", () => {
       },
     },
     {
-      name: "cleans old media files in first-level subdirectories",
+      name: "cleans old materialized media files in first-level subdirectories",
       run: async () => {
         await withTempStore(async (store) => {
           const saved = await store.saveMediaBuffer(Buffer.from("nested"), "text/plain", "inbound");
@@ -446,9 +446,9 @@ describe("media store", () => {
           await store.cleanOldMedia(-1);
 
           await expectPathMissing(saved.path);
-          await expect(store.readMediaBuffer(saved.id, "inbound")).rejects.toThrow(
-            "does not resolve",
-          );
+          const read = await store.readMediaBuffer(saved.id, "inbound");
+          expect(read.buffer.toString("utf8")).toBe("nested");
+          await expect(fs.readFile(read.path, "utf8")).resolves.toBe("nested");
         });
       },
     },

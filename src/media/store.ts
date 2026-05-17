@@ -58,7 +58,6 @@ export type LegacyMediaImportResult = {
   removed: number;
   skipped: number;
 };
-type ExpiredMediaBlobRow = Pick<MediaBlobRow, "id" | "subdir">;
 
 const defaultHttpRequestImpl: RequestImpl = httpRequest;
 const defaultHttpsRequestImpl: RequestImpl = httpsRequest;
@@ -414,33 +413,7 @@ export async function cleanOldMedia(ttlMs = DEFAULT_TTL_MS, options: CleanOldMed
   const cutoff = Date.now() - ttlMs;
   const materializationRoot = resolveMediaMaterializationRoot();
   const recursive = options.recursive ?? true;
-  const expiredRows = runOpenClawStateWriteTransaction((database) => {
-    const baseQuery = getMediaKysely(database.db)
-      .selectFrom("media_blobs")
-      .select(["id", "subdir"])
-      .where("created_at", "<", cutoff);
-    const query =
-      options.recursive === false
-        ? baseQuery.where("subdir", "not like", `%${path.sep}%`)
-        : baseQuery;
-    const rows = executeSqliteQuerySync(database.db, query).rows as ExpiredMediaBlobRow[];
-    for (const row of rows) {
-      executeSqliteQuerySync(
-        database.db,
-        getMediaKysely(database.db)
-          .deleteFrom("media_blobs")
-          .where("subdir", "=", row.subdir)
-          .where("id", "=", row.id),
-      );
-    }
-    return rows;
-  });
   const removedDirs = new Set<string>();
-  for (const row of expiredRows) {
-    const filePath = path.join(resolveMediaScopedDir(row.subdir, "cleanOldMedia"), row.id);
-    await fs.rm(filePath, { force: true }).catch(() => {});
-    removedDirs.add(path.dirname(filePath));
-  }
   const expiredMaterializedFiles = await collectExpiredMaterializedMediaFiles({
     dir: materializationRoot,
     cutoff,
