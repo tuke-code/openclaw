@@ -745,7 +745,8 @@ function maxFiniteNumber(values: Array<number | undefined>): number | undefined 
 
 async function rotateOversizedCodexAppServerStartupBinding(params: {
   binding: CodexAppServerThreadBinding | undefined;
-  sessionFile: string;
+  bindingIdentity: Parameters<typeof clearCodexAppServerBinding>[0];
+  sessionFile?: string;
   agentDir: string;
   codexHome?: string;
   config: EmbeddedRunAttemptParams["config"] | undefined;
@@ -754,10 +755,12 @@ async function rotateOversizedCodexAppServerStartupBinding(params: {
   if (!binding?.threadId) {
     return binding;
   }
-  if (params.config?.agents?.defaults?.compaction?.truncateAfterCompaction !== true) {
+  if (params.config?.agents?.defaults?.compaction?.rotateAfterCompaction !== true) {
     return binding;
   }
-  const sessionRecord = await readCodexSessionRecordForSessionFile(params.sessionFile);
+  const sessionRecord = params.sessionFile
+    ? await readCodexSessionRecordForSessionFile(params.sessionFile)
+    : undefined;
   const maxBytes = parseCodexAppServerByteLimit(
     params.config?.agents?.defaults?.compaction?.maxActiveTranscriptBytes,
   );
@@ -777,7 +780,7 @@ async function rotateOversizedCodexAppServerStartupBinding(params: {
           files: oversizedFiles.map((file) => ({ path: file.path, bytes: file.bytes })),
         },
       );
-      await clearCodexAppServerBinding(params.sessionFile);
+      await clearCodexAppServerBinding(params.bindingIdentity);
       return undefined;
     }
   }
@@ -804,7 +807,7 @@ async function rotateOversizedCodexAppServerStartupBinding(params: {
         nativeTokens,
       },
     );
-    await clearCodexAppServerBinding(params.sessionFile);
+    await clearCodexAppServerBinding(params.bindingIdentity);
     return undefined;
   }
   return binding;
@@ -898,10 +901,15 @@ export async function runCodexAppServerAttempt(
     agentId: params.agentId,
   });
   const agentDir = params.agentDir ?? resolveAgentDir(params.config ?? {}, sessionAgentId);
-  let startupBinding = await readCodexAppServerBinding(params.sessionFile);
+  const startupBindingIdentity = {
+    sessionKey: sandboxSessionKey,
+    sessionId: params.sessionId,
+  };
+  let startupBinding = await readCodexAppServerBinding(startupBindingIdentity);
   const startupBindingAuthProfileId = startupBinding?.authProfileId;
   startupBinding = await rotateOversizedCodexAppServerStartupBinding({
     binding: startupBinding,
+    bindingIdentity: startupBindingIdentity,
     sessionFile: params.sessionFile,
     agentDir,
     codexHome: appServer.start.env?.CODEX_HOME,
@@ -1022,10 +1030,6 @@ export async function runCodexAppServerAttempt(
       runId: params.runId,
       channelId: hookChannelId,
     },
-  });
-  const hadTranscript = hasSqliteSessionTranscriptEvents({
-    agentId: sessionAgentId,
-    sessionId: activeSessionId,
   });
   const hookContextWindowFields = {
     ...(params.contextWindowInfo?.tokens
@@ -1154,18 +1158,21 @@ export async function runCodexAppServerAttempt(
   };
   if (activeContextEngine) {
     await bootstrapHarnessContextEngine({
-      hadSessionFile,
+      hadTranscript,
       contextEngine: activeContextEngine,
       sessionId: activeSessionId,
-      sessionKey: contextSessionKey,
-      sessionFile: activeSessionFile,
+      sessionKey: sandboxSessionKey,
+      transcriptScope: { agentId: sessionAgentId, sessionId: activeSessionId },
       runtimeContext: buildActiveContextEngineRuntimeContext(),
       runMaintenance: runHarnessContextEngineMaintenance,
       config: params.config,
       warn: (message) => embeddedAgentLog.warn(message),
     });
     historyMessages =
-      (await readMirroredSessionHistoryMessages(activeSessionFile)) ?? historyMessages;
+      (await readMirroredSessionHistoryMessages({
+        agentId: sessionAgentId,
+        sessionId: activeSessionId,
+      })) ?? historyMessages;
   }
   const workspaceBootstrapContext = await buildCodexWorkspaceBootstrapContext({
     params,
