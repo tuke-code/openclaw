@@ -4,9 +4,9 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { resolveDefaultAgentDir } from "../agents/agent-scope-config.js";
 import type { AuthProfileStore } from "../agents/auth-profiles.js";
-import { AUTH_PROFILE_FILENAME } from "../agents/auth-profiles/path-constants.js";
+import { resolveAuthStorePath } from "../agents/auth-profiles/paths.js";
 import { clearConfigCache, clearRuntimeConfigSnapshot } from "../config/config.js";
-import { resolveOAuthPath } from "../config/paths.js";
+import { resolveOAuthDir } from "../config/paths.js";
 import { createEmptyPluginRegistry } from "../plugins/registry.js";
 import { setActivePluginRegistry } from "../plugins/runtime.js";
 import { clearSecretsRuntimeSnapshot } from "./runtime.js";
@@ -57,7 +57,7 @@ function requireGatewayAuth(
 function writeAuthProfileStore(agentDir: string): void {
   mkdirSync(agentDir, { recursive: true });
   writeFileSync(
-    path.join(agentDir, AUTH_PROFILE_FILENAME),
+    resolveAuthStorePath(agentDir),
     `${JSON.stringify({
       version: 1,
       profiles: {
@@ -207,7 +207,7 @@ describe("secrets runtime fast path", () => {
     {
       name: "oauth credentials file",
       setup: (env: NodeJS.ProcessEnv, _mainAgentDir: string, _agentDir: string) => {
-        const credentialsPath = resolveOAuthPath(env);
+        const credentialsPath = path.join(resolveOAuthDir(env), "oauth.json");
         mkdirSync(path.dirname(credentialsPath), { recursive: true });
         writeFileSync(
           credentialsPath,

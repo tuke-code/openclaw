@@ -75,8 +75,6 @@ function canReuseCurrentPluginMetadataSnapshot(params: LoadPluginRegistryParams)
   return (
     params.preferPersisted !== false &&
     params.stateDir === undefined &&
-    params.filePath === undefined &&
-    params.pluginIndexFilePath === undefined &&
     params.installRecords === undefined &&
     params.candidates === undefined &&
     params.diagnostics === undefined &&

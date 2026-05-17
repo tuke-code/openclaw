@@ -6,15 +6,17 @@ import {
   resolveDefaultAgentDir,
 } from "../agents/agent-scope-config.js";
 import {
-  AUTH_PROFILE_FILENAME,
-  AUTH_STATE_FILENAME,
-  LEGACY_AUTH_FILENAME,
-} from "../agents/auth-profiles/path-constants.js";
+  resolveAuthStatePath,
+  resolveAuthStorePath,
+  resolveLegacyAuthStorePath,
+} from "../agents/auth-profiles/paths.js";
+import { hasPersistedAuthProfileSecretsStore } from "../agents/auth-profiles/persisted.js";
 import type { AuthProfileStore } from "../agents/auth-profiles/types.js";
-import { resolveOAuthPath } from "../config/paths.js";
+import { resolveOAuthDir } from "../config/paths.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { coerceSecretRef } from "../config/types.secrets.js";
 import type { PluginOrigin } from "../plugins/plugin-origin.types.js";
+import { resolveOpenClawStateSqlitePath } from "../state/openclaw-state-db.paths.js";
 import { resolveUserPath } from "../utils.js";
 import type {
   PreparedSecretsRuntimeSnapshot,
@@ -30,10 +32,13 @@ const RUNTIME_PATH_ENV_KEYS = [
   "OPENCLAW_HOME",
   "OPENCLAW_STATE_DIR",
   "OPENCLAW_CONFIG_PATH",
+  "OPENCLAW_OAUTH_DIR",
   "OPENCLAW_AGENT_DIR",
   "PI_CODING_AGENT_DIR",
   "OPENCLAW_TEST_FAST",
 ] as const;
+
+const LEGACY_OAUTH_FILENAME = "oauth.json";
 
 export function mergeSecretsRuntimeEnv(
   env: NodeJS.ProcessEnv | Record<string, string | undefined> | undefined,
@@ -84,12 +89,18 @@ function resolveCandidateAgentDirs(params: {
     : collectCandidateAgentDirs(params.config, params.env);
 }
 
-function hasCandidateAuthProfileStoreSource(agentDir: string): boolean {
+function hasCandidateAuthProfileStoreSource(agentDir: string, env: NodeJS.ProcessEnv): boolean {
   return (
-    existsSync(path.join(agentDir, AUTH_PROFILE_FILENAME)) ||
-    existsSync(path.join(agentDir, AUTH_STATE_FILENAME)) ||
-    existsSync(path.join(agentDir, LEGACY_AUTH_FILENAME))
+    existsSync(resolveAuthStorePath(agentDir, env)) ||
+    existsSync(resolveAuthStatePath(agentDir, env)) ||
+    existsSync(resolveLegacyAuthStorePath(agentDir, env)) ||
+    (existsSync(resolveOpenClawStateSqlitePath(env)) &&
+      hasPersistedAuthProfileSecretsStore(agentDir, { env }))
   );
+}
+
+function hasLegacyOAuthCredentials(env: NodeJS.ProcessEnv): boolean {
+  return existsSync(path.join(resolveOAuthDir(env), LEGACY_OAUTH_FILENAME));
 }
 
 export function hasCandidateAuthProfileStoreSources(params: {
@@ -97,12 +108,13 @@ export function hasCandidateAuthProfileStoreSources(params: {
   env: NodeJS.ProcessEnv | Record<string, string | undefined>;
   agentDirs?: string[];
 }): boolean {
+  const env = params.env as NodeJS.ProcessEnv;
   const candidateDirs = resolveCandidateAgentDirs(params);
-  const mainAgentDir = resolveUserPath(resolveDefaultAgentDir({}, params.env), params.env);
+  const mainAgentDir = resolveUserPath(resolveDefaultAgentDir({}, env), env);
   return (
-    candidateDirs.some((agentDir) => hasCandidateAuthProfileStoreSource(agentDir)) ||
-    hasCandidateAuthProfileStoreSource(mainAgentDir) ||
-    existsSync(resolveOAuthPath(params.env as NodeJS.ProcessEnv))
+    candidateDirs.some((agentDir) => hasCandidateAuthProfileStoreSource(agentDir, env)) ||
+    hasCandidateAuthProfileStoreSource(mainAgentDir, env) ||
+    hasLegacyOAuthCredentials(env)
   );
 }
 
