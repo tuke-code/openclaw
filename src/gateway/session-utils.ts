@@ -670,6 +670,7 @@ function resolveChildSessionKeys(
 
 function resolveTranscriptUsageFallback(params: {
   cfg: OpenClawConfig;
+  agentId?: string;
   databasePath?: string;
   key: string;
   entry?: SessionEntry;
@@ -690,9 +691,9 @@ function resolveTranscriptUsageFallback(params: {
     return null;
   }
   const parsed = parseAgentSessionKey(params.key);
-  const agentId = parsed?.agentId
-    ? normalizeAgentId(parsed.agentId)
-    : resolveDefaultAgentId(params.cfg);
+  const agentId = normalizeAgentId(
+    params.agentId ?? parsed?.agentId ?? resolveDefaultAgentId(params.cfg),
+  );
   const snapshot = readRecentSessionUsageFromTranscript(
     {
       agentId,
@@ -1304,6 +1305,7 @@ export function resolveSessionDisplayModelIdentityRef(params: {
 
 export function buildGatewaySessionRow(params: {
   cfg: OpenClawConfig;
+  agentId?: string;
   databasePath?: string;
   store: Record<string, SessionEntry>;
   key: string;
@@ -1346,7 +1348,9 @@ export function buildGatewaySessionRow(params: {
     deliveryContext: entry?.deliveryContext,
   });
   const parsedAgent = parseAgentSessionKey(key);
-  const sessionAgentId = normalizeAgentId(parsedAgent?.agentId ?? resolveDefaultAgentId(cfg));
+  const sessionAgentId = normalizeAgentId(
+    params.agentId ?? parsedAgent?.agentId ?? resolveDefaultAgentId(cfg),
+  );
   const rowContext = params.rowContext;
   const subagentRun = rowContext
     ? rowContext.subagentRuns.getDisplaySubagentRun(key)
@@ -1432,6 +1436,7 @@ export function buildGatewaySessionRow(params: {
     (needsTranscriptTotalTokens || needsTranscriptContextTokens || needsTranscriptEstimatedCostUsd)
       ? resolveTranscriptUsageFallback({
           cfg,
+          agentId: sessionAgentId,
           databasePath: params.databasePath,
           key,
           entry,
@@ -1955,10 +1960,24 @@ function resolveSessionRowSourceDatabasePath(params: {
   return databasePath && databasePath !== "(multiple)" ? databasePath : undefined;
 }
 
+function resolveSessionRowSourceAgentId(params: {
+  cfg: OpenClawConfig;
+  sourceAgentIdBySessionKey?: Record<string, string>;
+  key: string;
+}): string {
+  const parsed = parseAgentSessionKey(params.key);
+  return normalizeAgentId(
+    params.sourceAgentIdBySessionKey?.[params.key] ??
+      parsed?.agentId ??
+      resolveDefaultAgentId(params.cfg),
+  );
+}
+
 export function listSessionsFromStore(params: {
   cfg: OpenClawConfig;
   databasePath?: string;
   sourceDatabasePathBySessionKey?: Record<string, string>;
+  sourceAgentIdBySessionKey?: Record<string, string>;
   store: Record<string, SessionEntry>;
   modelCatalog?: ModelCatalogEntry[];
   opts: import("./protocol/index.js").SessionsListParams;
@@ -1996,8 +2015,14 @@ export function listSessionsFromStore(params: {
       sourceDatabasePathBySessionKey: params.sourceDatabasePathBySessionKey,
       key,
     });
+    const rowAgentId = resolveSessionRowSourceAgentId({
+      cfg,
+      sourceAgentIdBySessionKey: params.sourceAgentIdBySessionKey,
+      key,
+    });
     return buildGatewaySessionRow({
       cfg,
+      agentId: rowAgentId,
       databasePath: rowDatabasePath,
       store,
       key,
@@ -2042,6 +2067,7 @@ export async function listSessionsFromStoreAsync(params: {
   cfg: OpenClawConfig;
   databasePath?: string;
   sourceDatabasePathBySessionKey?: Record<string, string>;
+  sourceAgentIdBySessionKey?: Record<string, string>;
   store: Record<string, SessionEntry>;
   modelCatalog?: ModelCatalogEntry[];
   opts: import("./protocol/index.js").SessionsListParams;
@@ -2081,8 +2107,14 @@ export async function listSessionsFromStoreAsync(params: {
       sourceDatabasePathBySessionKey: params.sourceDatabasePathBySessionKey,
       key,
     });
+    const rowAgentId = resolveSessionRowSourceAgentId({
+      cfg,
+      sourceAgentIdBySessionKey: params.sourceAgentIdBySessionKey,
+      key,
+    });
     const row = buildGatewaySessionRow({
       cfg,
+      agentId: rowAgentId,
       databasePath: rowDatabasePath,
       store,
       key,
@@ -2102,12 +2134,8 @@ export async function listSessionsFromStoreAsync(params: {
       includeTranscriptFields &&
       (includeDerivedTitles || includeLastMessage)
     ) {
-      const parsed = parseAgentSessionKey(key);
-      const sessionAgentId = parsed?.agentId
-        ? normalizeAgentId(parsed.agentId)
-        : resolveDefaultAgentId(cfg);
       const fields = await readSessionTitleFieldsFromTranscriptAsync({
-        agentId: sessionAgentId,
+        agentId: rowAgentId,
         ...(rowDatabasePath ? { path: rowDatabasePath } : {}),
         sessionId: entry.sessionId,
       });
