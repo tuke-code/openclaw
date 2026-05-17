@@ -490,6 +490,53 @@ describe("SQLite session transcript store", () => {
     ).toEqual([{ type: "message", id: "m1" }]);
   });
 
+  it("includes registered custom transcript paths when listing by agent", () => {
+    const stateDir = createTempDir();
+    const env = { OPENCLAW_STATE_DIR: stateDir };
+    const customPath = path.join(stateDir, "custom-agent.sqlite");
+    const otherPath = path.join(stateDir, "other-agent.sqlite");
+
+    appendSqliteSessionTranscriptEvent({
+      env,
+      agentId: "worker-1",
+      sessionId: "default-session",
+      event: { type: "message", id: "default" },
+      now: () => 100,
+    });
+    appendSqliteSessionTranscriptEvent({
+      env,
+      path: customPath,
+      agentId: "worker-1",
+      sessionId: "custom-session",
+      event: { type: "message", id: "custom" },
+      now: () => 200,
+    });
+    appendSqliteSessionTranscriptEvent({
+      env,
+      path: otherPath,
+      agentId: "worker-2",
+      sessionId: "other-session",
+      event: { type: "message", id: "other" },
+      now: () => 300,
+    });
+
+    expect(listSqliteSessionTranscripts({ env, agentId: "worker-1" })).toEqual([
+      {
+        agentId: "worker-1",
+        path: customPath,
+        sessionId: "custom-session",
+        updatedAt: 200,
+        eventCount: 1,
+      },
+      {
+        agentId: "worker-1",
+        sessionId: "default-session",
+        updatedAt: 100,
+        eventCount: 1,
+      },
+    ]);
+  });
+
   it("deletes transcript snapshots with the transcript", () => {
     const stateDir = createTempDir();
     const env = { OPENCLAW_STATE_DIR: stateDir };

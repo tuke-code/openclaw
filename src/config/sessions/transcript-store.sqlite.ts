@@ -11,6 +11,7 @@ import type { DB as OpenClawAgentKyselyDatabase } from "../../state/openclaw-age
 import {
   listOpenClawRegisteredAgentDatabases,
   openOpenClawAgentDatabase,
+  resolveOpenClawAgentSqlitePath,
   runOpenClawAgentWriteTransaction,
   type OpenClawAgentDatabase,
 } from "../../state/openclaw-agent-db.js";
@@ -174,6 +175,23 @@ function openTranscriptAgentDatabase(
   options: SqliteSessionTranscriptStoreOptions,
 ): OpenClawAgentDatabase {
   return openOpenClawAgentDatabase(options);
+}
+
+function listTranscriptAgentDatabaseTargets(
+  options: OpenClawStateDatabaseOptions & { agentId?: string },
+): Array<{ agentId: string; path?: string }> {
+  if (!options.agentId) {
+    return listOpenClawRegisteredAgentDatabases(options);
+  }
+  const agentId = normalizeAgentId(options.agentId);
+  if (options.path) {
+    return [{ agentId, path: options.path }];
+  }
+  const defaultPath = resolveOpenClawAgentSqlitePath({ ...options, agentId });
+  const registered = listOpenClawRegisteredAgentDatabases(options).filter(
+    (row) => row.agentId === agentId && row.path !== defaultPath,
+  );
+  return [{ agentId }, ...registered.map((row) => ({ agentId: row.agentId, path: row.path }))];
 }
 
 function readNextTranscriptSeq(database: OpenClawAgentDatabase, sessionId: string): number {
@@ -475,14 +493,7 @@ export function resolveSqliteSessionTranscriptScope(
 export function listSqliteSessionTranscripts(
   options: OpenClawStateDatabaseOptions & { agentId?: string } = {},
 ): SqliteSessionTranscript[] {
-  const agentDatabases = options.agentId
-    ? [
-        {
-          agentId: normalizeAgentId(options.agentId),
-          path: options.path,
-        },
-      ]
-    : listOpenClawRegisteredAgentDatabases(options);
+  const agentDatabases = listTranscriptAgentDatabaseTargets(options);
   const transcripts: SqliteSessionTranscript[] = [];
   for (const agentDatabase of agentDatabases) {
     const database = openOpenClawAgentDatabase({
