@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import fs from "node:fs/promises";
 import path from "node:path";
+import { DatabaseSync, type SQLOutputValue } from "node:sqlite";
 import { fetchWithSsrFGuard } from "openclaw/plugin-sdk/ssrf-runtime";
 import {
   scanDirectReplyTranscriptSentinels,
@@ -95,15 +95,12 @@ type RuntimeParityCaptureParams = {
   mockBaseUrl?: string;
 };
 
-type RuntimeParitySessionEntry = {
-  sessionId?: string;
-  sessionFile?: string;
-  updatedAt?: number;
-  spawnedBy?: string;
-  parentSessionKey?: string;
-  spawnDepth?: number;
-  subagentRole?: string;
+type RuntimeParityTranscriptEntry = {
+  sessionId: string;
+  updatedAt: number;
 };
+
+type RuntimeParitySqliteRow = Record<string, SQLOutputValue>;
 
 type RuntimeParityTranscriptRecord = {
   message: Record<string, unknown>;
@@ -838,98 +835,110 @@ function classifyRuntimeParityCells(params: {
   return { drift: "text-only", driftDetails: "final text differs after whitespace normalization" };
 }
 
-function resolveSessionTranscriptFile(params: {
-  sessionsDir: string;
-  sessionId: string;
-  sessionEntry?: RuntimeParitySessionEntry;
-}): string | undefined {
-  const explicitSessionFile = readNonEmptyString(params.sessionEntry?.sessionFile);
-  if (explicitSessionFile) {
-    const candidate = path.isAbsolute(explicitSessionFile)
-      ? explicitSessionFile
-      : path.join(params.sessionsDir, explicitSessionFile);
-    return candidate;
-  }
-  const baseName = `${params.sessionId}.jsonl`;
-  return path.join(params.sessionsDir, baseName);
-}
-
-function isRuntimeParityRootSession(entry: RuntimeParitySessionEntry) {
-  if (readNonEmptyString(entry.spawnedBy) || readNonEmptyString(entry.parentSessionKey)) {
-    return false;
-  }
-  if (typeof entry.spawnDepth === "number" && entry.spawnDepth > 0) {
-    return false;
-  }
-  if (readNonEmptyString(entry.subagentRole)) {
-    return false;
-  }
-  return true;
-}
-
-async function readRuntimeParitySessionEntries(params: {
-  stateDir: string;
-  agentId: string;
-}): Promise<Array<RuntimeParitySessionEntry>> {
-  const storePath = path.join(
-    params.stateDir,
+function runtimeParityAgentDatabasePath(params: { gateway: QaGatewayLike; agentId: string }) {
+  return path.join(
+    params.gateway.tempRoot,
+    "state",
     "agents",
     params.agentId,
-    "sessions",
-    "sessions.json",
+    "agent",
+    "openclaw-agent.sqlite",
   );
-  try {
-    const raw = await fs.readFile(storePath, "utf8");
-    const parsed = JSON.parse(raw) as Record<string, RuntimeParitySessionEntry>;
-    const entries = Object.values(parsed).filter((entry) => readNonEmptyString(entry?.sessionId));
-    const rootEntries = entries.filter(isRuntimeParityRootSession);
-    const candidates = rootEntries.length > 0 ? rootEntries : entries;
-    return candidates.toSorted((left, right) => (right.updatedAt ?? 0) - (left.updatedAt ?? 0));
-  } catch {
-    return [];
+}
+
+function sqliteNumber(value: SQLOutputValue | undefined): number {
+  if (typeof value === "bigint") {
+    return Number(value);
   }
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function sqliteSessionId(value: SQLOutputValue | undefined): string | undefined {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function readRuntimeParityTranscriptEntries(params: {
+  database: DatabaseSync;
+  rootOnly: boolean;
+}): RuntimeParityTranscriptEntry[] {
+  const rows = params.database
+    .prepare(
+      `
+        SELECT events.session_id AS session_id, max(events.created_at) AS updated_at
+        FROM transcript_events AS events
+        LEFT JOIN sessions AS sessions ON sessions.session_id = events.session_id
+        ${
+          params.rootOnly
+            ? "WHERE sessions.session_id IS NOT NULL AND sessions.spawned_by IS NULL AND sessions.parent_session_key IS NULL"
+            : ""
+        }
+        GROUP BY events.session_id
+        ORDER BY updated_at DESC, events.session_id ASC
+      `,
+    )
+    .all() as RuntimeParitySqliteRow[];
+  return rows.flatMap((row) => {
+    const sessionId = sqliteSessionId(row.session_id);
+    if (!sessionId) {
+      return [];
+    }
+    return [{ sessionId, updatedAt: sqliteNumber(row.updated_at) }];
+  });
+}
+
+function readRuntimeParityTranscript(params: {
+  database: DatabaseSync;
+  sessionId: string;
+}): string {
+  const rows = params.database
+    .prepare(
+      `
+        SELECT event_json
+        FROM transcript_events
+        WHERE session_id = ?
+        ORDER BY seq ASC
+      `,
+    )
+    .all(params.sessionId) as RuntimeParitySqliteRow[];
+  return rows
+    .flatMap((row) => (typeof row.event_json === "string" ? [row.event_json] : []))
+    .join("\n");
 }
 
 async function loadRuntimeParityTranscripts(params: {
   gateway: QaGatewayLike;
   agentId: string;
 }): Promise<string> {
-  const sessionsDir = path.join(
-    params.gateway.tempRoot,
-    "state",
-    "agents",
-    params.agentId,
-    "sessions",
-  );
-  const sessionEntries = await readRuntimeParitySessionEntries({
-    stateDir: path.join(params.gateway.tempRoot, "state"),
-    agentId: params.agentId,
-  });
-  const transcripts: string[] = [];
-  for (const sessionEntry of sessionEntries) {
-    const sessionId = readNonEmptyString(sessionEntry.sessionId);
-    if (!sessionId) {
-      continue;
-    }
-    const sessionFile = resolveSessionTranscriptFile({
-      sessionsDir,
-      sessionId,
-      sessionEntry,
-    });
-    if (!sessionFile) {
-      continue;
-    }
-    try {
-      const transcript = await fs.readFile(sessionFile, "utf8");
+  const databasePath = runtimeParityAgentDatabasePath(params);
+  let database: DatabaseSync | undefined;
+  try {
+    database = new DatabaseSync(databasePath, { readOnly: true });
+    const rootEntries = readRuntimeParityTranscriptEntries({ database, rootOnly: true });
+    const sessionEntries =
+      rootEntries.length > 0
+        ? rootEntries
+        : readRuntimeParityTranscriptEntries({ database, rootOnly: false });
+    const transcripts: string[] = [];
+    for (const sessionEntry of sessionEntries) {
+      const transcript = readRuntimeParityTranscript({
+        database,
+        sessionId: sessionEntry.sessionId,
+      });
       if (transcript.trim().length > 0 && !isHeartbeatOnlyRuntimeTranscript(transcript)) {
         transcripts.push(transcript.trimEnd());
         break;
       }
+    }
+    return transcripts.join("\n");
+  } catch {
+    return "";
+  } finally {
+    try {
+      database?.close();
     } catch {
-      // Ignore missing transcript files so failed cells still render.
+      // Ignore close failures so failed cells still render.
     }
   }
-  return transcripts.join("\n");
 }
 
 async function loadRuntimeParityMockToolCalls(

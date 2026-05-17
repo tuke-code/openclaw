@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   captureRuntimeParityCell,
@@ -66,7 +67,6 @@ function stableHashForTest(value: unknown) {
 
 type RuntimeParityGatewaySessionFixture = {
   sessionId: string;
-  sessionFile?: string;
   updatedAt: number;
   transcriptBytes: string;
   spawnedBy?: string;
@@ -80,38 +80,68 @@ async function createRuntimeParityGatewayTempRoot(
 ) {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "runtime-parity-"));
   tempRoots.push(tempRoot);
-  const sessionsDir = path.join(tempRoot, "state", "agents", "qa", "sessions");
-  await fs.mkdir(sessionsDir, { recursive: true });
+  const agentDir = path.join(tempRoot, "state", "agents", "qa", "agent");
+  await fs.mkdir(agentDir, { recursive: true });
   const fixtures =
     typeof fixture === "string"
       ? [
           {
             sessionId: "session-1",
-            sessionFile: "session-1.jsonl",
             updatedAt: 1,
             transcriptBytes: fixture,
           },
         ]
       : fixture;
-  const store = Object.fromEntries(
-    fixtures.map(({ transcriptBytes: _transcriptBytes, ...entry }) => [
-      entry.sessionId,
-      {
-        ...entry,
-        sessionFile: entry.sessionFile ?? `${entry.sessionId}.jsonl`,
-      },
-    ]),
-  );
-  await fs.writeFile(path.join(sessionsDir, "sessions.json"), JSON.stringify(store), "utf8");
-  await Promise.all(
-    fixtures.map((entry) =>
-      fs.writeFile(
-        path.join(sessionsDir, entry.sessionFile ?? `${entry.sessionId}.jsonl`),
-        entry.transcriptBytes,
-        "utf8",
-      ),
-    ),
-  );
+  const database = new DatabaseSync(path.join(agentDir, "openclaw-agent.sqlite"));
+  try {
+    database.exec(`
+      CREATE TABLE sessions (
+        session_id TEXT NOT NULL PRIMARY KEY,
+        session_key TEXT NOT NULL,
+        session_scope TEXT NOT NULL DEFAULT 'conversation',
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        parent_session_key TEXT,
+        spawned_by TEXT
+      );
+      CREATE TABLE transcript_events (
+        session_id TEXT NOT NULL,
+        seq INTEGER NOT NULL,
+        event_json TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        PRIMARY KEY (session_id, seq)
+      );
+    `);
+    const insertSession = database.prepare(
+      `INSERT INTO sessions (
+        session_id,
+        session_key,
+        session_scope,
+        created_at,
+        updated_at,
+        parent_session_key,
+        spawned_by
+      ) VALUES (?, ?, 'conversation', ?, ?, ?, ?)`,
+    );
+    const insertEvent = database.prepare(
+      `INSERT INTO transcript_events (session_id, seq, event_json, created_at) VALUES (?, ?, ?, ?)`,
+    );
+    for (const entry of fixtures) {
+      insertSession.run(
+        entry.sessionId,
+        entry.sessionId,
+        entry.updatedAt,
+        entry.updatedAt,
+        entry.parentSessionKey ?? null,
+        entry.spawnedBy ?? null,
+      );
+      entry.transcriptBytes.split(/\r?\n/u).forEach((line, index) => {
+        insertEvent.run(entry.sessionId, index, line, entry.updatedAt);
+      });
+    }
+  } finally {
+    database.close();
+  }
   return tempRoot;
 }
 
