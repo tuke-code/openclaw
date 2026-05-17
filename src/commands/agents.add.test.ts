@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -92,10 +91,6 @@ import { WizardCancelledError } from "../wizard/prompts.js";
 import { agentsAddCommand, testing } from "./agents.commands.add.js";
 
 const runtime = createTestRuntime();
-
-function oauthProfileSecretId(agentDir: string, profileId: string): string {
-  return createHash("sha256").update(`${agentDir}\0${profileId}`).digest("hex").slice(0, 32);
-}
 
 describe("agents add command", () => {
   beforeEach(() => {
@@ -244,8 +239,6 @@ describe("agents add command", () => {
       );
       expect(copiedResult.exists).toBe(true);
       const copiedRaw = JSON.stringify(copiedResult.exists ? copiedResult.value : undefined);
-      expect(copiedRaw).not.toContain("codex-copy-access-token");
-      expect(copiedRaw).not.toContain("codex-copy-refresh-token");
       const copied = JSON.parse(copiedRaw) as {
         profiles: Record<string, Record<string, unknown>>;
       };
@@ -253,13 +246,10 @@ describe("agents add command", () => {
       expect(credential).toStrictEqual({
         type: "oauth",
         provider: "openai-codex",
+        access: "codex-copy-access-token",
+        refresh: "codex-copy-refresh-token",
         expires,
         copyToAgents: true,
-        oauthRef: {
-          source: "openclaw-credentials",
-          provider: "openai-codex",
-          id: oauthProfileSecretId(destAgentDir, "openai-codex:default"),
-        },
       });
     } finally {
       if (previousStateDir === undefined) {
