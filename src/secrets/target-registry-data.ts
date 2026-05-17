@@ -452,7 +452,7 @@ const CORE_SECRET_TARGET_REGISTRY: SecretTargetRegistryEntry[] = [
   {
     id: "tools.web.search.*.apiKey",
     targetType: "tools.web.search.*.apiKey",
-    configFile: "openclaw.json",
+    store: "openclaw.json",
     pathPattern: "tools.web.search.*.apiKey",
     secretShape: SECRET_INPUT_SHAPE,
     expectedResolvedValue: "string",
