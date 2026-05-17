@@ -517,11 +517,7 @@ describe("buildQaRuntimeEnv", () => {
     }
 
     for (const agentId of ["main", "qa"]) {
-      const storeRaw = await readFile(
-        path.join(stateDir, "agents", agentId, "agent", "auth-profiles.json"),
-        "utf8",
-      );
-      const storeProfiles = parseAuthProfileStore(storeRaw).profiles;
+      const storeProfiles = readQaAuthProfiles(stateDir, agentId).profiles;
       for (const [profileId, provider] of [
         ["qa-live-openai-env", "openai"],
         ["qa-live-openai-codex-env", "openai-codex"],
@@ -549,12 +545,8 @@ describe("buildQaRuntimeEnv", () => {
       },
     });
 
-    const storeRaw = await readFile(
-      path.join(stateDir, "agents", "qa", "agent", "auth-profiles.json"),
-      "utf8",
-    );
     const storeProfile = requireAuthProfile(
-      parseAuthProfileStore(storeRaw).profiles,
+      readQaAuthProfiles(stateDir, "qa").profiles,
       "qa-live-openai-codex-env",
     );
     expect(storeProfile.type).toBe("api_key");
@@ -675,12 +667,8 @@ describe("buildQaRuntimeEnv", () => {
     expect(configProfile.provider).toBe("openai-codex");
     expect(configProfile.mode).toBe("api_key");
     for (const agentId of ["main", "qa"]) {
-      const storeRaw = await readFile(
-        path.join(stateDir, "agents", agentId, "agent", "auth-profiles.json"),
-        "utf8",
-      );
       const storeProfile = requireAuthProfile(
-        parseAuthProfileStore(storeRaw).profiles,
+        readQaAuthProfiles(stateDir, agentId).profiles,
         "qa-live-openai-codex-env",
       );
       expect(storeProfile.type).toBe("api_key");
@@ -727,12 +715,8 @@ describe("buildQaRuntimeEnv", () => {
       env,
     });
 
-    const storeRaw = await readFile(
-      path.join(stateDir, "agents", "qa", "agent", "auth-profiles.json"),
-      "utf8",
-    );
     const storeProfile = requireAuthProfile(
-      parseAuthProfileStore(storeRaw).profiles,
+      readQaAuthProfiles(stateDir, "qa").profiles,
       "qa-live-openai-codex-env",
     );
     expect(storeProfile.type).toBe("api_key");
@@ -773,12 +757,8 @@ describe("buildQaRuntimeEnv", () => {
       },
     });
 
-    const storeRaw = await readFile(
-      path.join(stateDir, "agents", "main", "agent", "auth-profiles.json"),
-      "utf8",
-    );
     const storeProfile = requireAuthProfile(
-      parseAuthProfileStore(storeRaw).profiles,
+      readQaAuthProfiles(stateDir, "main").profiles,
       "qa-live-openai-codex-env",
     );
     expect(storeProfile.type).toBe("api_key");
