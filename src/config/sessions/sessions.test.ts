@@ -620,7 +620,7 @@ describe("resolveAndPersistSessionTranscriptScope", () => {
     expect(saved[sessionKey]).toEqual(store[sessionKey]);
   });
 
-  it("creates SQLite scope when session is not yet present", async () => {
+  it("persists SQLite scope when session is not yet present", async () => {
     const sessionId = "new-session-id";
     const sessionKey = "agent:main:telegram:group:123";
 
@@ -633,7 +633,11 @@ describe("resolveAndPersistSessionTranscriptScope", () => {
     expect(result).toMatchObject({ agentId: "main", sessionId });
     expect(result.sessionEntry.sessionId).toBe(sessionId);
     const saved = readFixtureSessionEntries();
-    expect(saved[sessionKey]).toBeUndefined();
+    expect(saved[sessionKey]).toEqual({
+      sessionId,
+      sessionStartedAt: expect.any(Number),
+      updatedAt: expect.any(Number),
+    });
   });
 
   it("rotates SQLite scope when sessionId changes on the same session key", async () => {

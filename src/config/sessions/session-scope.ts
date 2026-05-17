@@ -14,19 +14,19 @@ export async function resolveAndPersistSessionTranscriptScope(params: {
   if (!agentId) {
     throw new Error(`Session stores are SQLite-only; cannot resolve agent for ${sessionKey}`);
   }
-  const baseEntry = params.sessionEntry ??
-    getSessionEntry({ agentId, sessionKey }) ?? {
-      sessionId,
-      updatedAt: now,
-      sessionStartedAt: now,
-    };
+  const existingEntry = params.sessionEntry ?? getSessionEntry({ agentId, sessionKey });
+  const baseEntry = existingEntry ?? {
+    sessionId,
+    updatedAt: now,
+    sessionStartedAt: now,
+  };
   const persistedEntry: SessionEntry = {
     ...baseEntry,
     sessionId,
     updatedAt: now,
     sessionStartedAt: baseEntry.sessionId === sessionId ? (baseEntry.sessionStartedAt ?? now) : now,
   };
-  if (baseEntry.sessionId !== sessionId) {
+  if (!existingEntry || baseEntry.sessionId !== sessionId) {
     upsertSessionEntry({
       agentId,
       sessionKey,
