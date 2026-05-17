@@ -103,6 +103,8 @@ dump_debug_logs() {
     /tmp/openclaw-install.log \
     /tmp/openclaw-onboard.json \
     /tmp/openclaw-channel-add.log \
+    /tmp/openclaw-config-before-missing-whatsapp-login.json \
+    /tmp/openclaw-config-after-missing-whatsapp-login.json \
     /tmp/openclaw-missing-whatsapp-login.log \
     /tmp/openclaw-channels-status.json \
     /tmp/openclaw-channels-status.err \
@@ -164,6 +166,7 @@ if (config.channels && Object.hasOwn(config.channels, "whatsapp")) {
   fs.writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`);
 }
 NODE
+cp "$HOME/.openclaw/openclaw.json" /tmp/openclaw-config-before-missing-whatsapp-login.json
 set +e
 openclaw channels login --channel whatsapp >/tmp/openclaw-missing-whatsapp-login.log 2>&1
 missing_whatsapp_login_status=$?
@@ -174,14 +177,11 @@ if [ "$missing_whatsapp_login_status" -eq 0 ]; then
   exit 1
 fi
 grep -F "Channel whatsapp is not configured. Add channels.whatsapp to your config before logging in." /tmp/openclaw-missing-whatsapp-login.log >/dev/null
-node <<'NODE'
-const fs = require("node:fs");
-const path = require("node:path");
-const config = JSON.parse(fs.readFileSync(path.join(process.env.HOME, ".openclaw", "openclaw.json"), "utf8"));
-if (config.channels && Object.hasOwn(config.channels, "whatsapp")) {
-  throw new Error("missing-config login unexpectedly created channels.whatsapp");
-}
-NODE
+cp "$HOME/.openclaw/openclaw.json" /tmp/openclaw-config-after-missing-whatsapp-login.json
+if ! cmp -s /tmp/openclaw-config-before-missing-whatsapp-login.json /tmp/openclaw-config-after-missing-whatsapp-login.json; then
+  echo "missing-config login unexpectedly mutated openclaw.json" >&2
+  exit 1
+fi
 
 echo "Checking status surfaces for $CHANNEL..."
 openclaw channels status --json >/tmp/openclaw-channels-status.json 2>/tmp/openclaw-channels-status.err
