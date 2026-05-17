@@ -555,11 +555,12 @@ CREATE INDEX IF NOT EXISTS idx_acp_replay_events_session_seq
   ON acp_replay_events(session_id, seq);
 
 CREATE TABLE IF NOT EXISTS agent_databases (
-  agent_id TEXT NOT NULL PRIMARY KEY,
+  agent_id TEXT NOT NULL,
   path TEXT NOT NULL,
   schema_version INTEGER NOT NULL,
   last_seen_at INTEGER NOT NULL,
-  size_bytes INTEGER
+  size_bytes INTEGER,
+  PRIMARY KEY (agent_id, path)
 );
 
 CREATE TABLE IF NOT EXISTS plugin_state_entries (

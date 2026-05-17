@@ -91,6 +91,27 @@ describe("openclaw agent database", () => {
     expect(registered?.sizeBytes).toBeGreaterThan(0);
   });
 
+  it("keeps multiple registered paths for the same agent", () => {
+    const stateDir = createTempStateDir();
+    const env = { OPENCLAW_STATE_DIR: stateDir };
+    const relocatedPath = path.join(stateDir, "relocated", "worker-1.sqlite");
+    const relocated = openOpenClawAgentDatabase({
+      agentId: "worker-1",
+      env,
+      path: relocatedPath,
+    });
+    const defaultDatabase = openOpenClawAgentDatabase({
+      agentId: "worker-1",
+      env,
+    });
+
+    expect(
+      listOpenClawRegisteredAgentDatabases({ env })
+        .filter((entry) => entry.agentId === "worker-1")
+        .map((entry) => entry.path),
+    ).toEqual([defaultDatabase.path, relocated.path].toSorted());
+  });
+
   it("configures durable SQLite connection pragmas", () => {
     const stateDir = createTempStateDir();
     const database = openOpenClawAgentDatabase({

@@ -458,6 +458,124 @@ describe("state migrations", () => {
     await expectMissingPath(legacyPluginStatePath);
   });
 
+  it("preserves typed metadata when importing legacy delivery queues", async () => {
+    const root = await createTempDir();
+    const stateDir = path.join(root, ".openclaw");
+    const env = createEnv(stateDir);
+    const cfg = createConfig();
+    const outboundQueueDir = path.join(stateDir, "delivery-queue");
+    const sessionQueueDir = path.join(stateDir, "session-delivery-queue");
+    await fs.mkdir(outboundQueueDir, { recursive: true });
+    await fs.mkdir(sessionQueueDir, { recursive: true });
+    await fs.writeFile(
+      path.join(outboundQueueDir, "outbound-1.json"),
+      `${JSON.stringify({
+        id: "outbound-1",
+        channel: "discord",
+        to: "channel-1",
+        accountId: "account-1",
+        session: { key: "agent:main:desk", requesterAccountId: "session-account" },
+        retryCount: 3,
+        lastAttemptAt: 111,
+        lastError: "network",
+        recoveryState: "unknown_after_send",
+        platformSendStartedAt: 222,
+      })}\n`,
+      "utf8",
+    );
+    await fs.writeFile(
+      path.join(sessionQueueDir, "session-1.json"),
+      `${JSON.stringify({
+        id: "session-1",
+        kind: "agentTurn",
+        sessionKey: "agent:main:desk",
+        route: { channel: "slack", to: "thread-1", accountId: "workspace-1" },
+        retryCount: 2,
+        lastAttemptAt: 333,
+        lastError: "rate limited",
+      })}\n`,
+      "utf8",
+    );
+
+    const detected = await detectLegacyStateMigrations({
+      cfg,
+      env,
+      homedir: () => root,
+    });
+
+    expect(detected.preview).toEqual([
+      `- Outbound delivery queue: ${outboundQueueDir} → SQLite`,
+      `- Session delivery queue: ${sessionQueueDir} → SQLite`,
+    ]);
+
+    const result = await runLegacyStateMigrations({
+      detected,
+      now: () => 1234,
+    });
+
+    expect(result.warnings).toStrictEqual([]);
+    expect(result.changes).toEqual([
+      "Imported 1 outbound delivery queue row(s) into SQLite",
+      "Imported 1 session delivery queue row(s) into SQLite",
+    ]);
+
+    const stateDatabase = openOpenClawStateDatabase({ env });
+    const db = getNodeSqliteKysely<DeliveryQueueTestDatabase>(stateDatabase.db);
+    const rows = executeSqliteQuerySync(
+      stateDatabase.db,
+      db
+        .selectFrom("delivery_queue_entries")
+        .select([
+          "queue_name",
+          "id",
+          "entry_kind",
+          "session_key",
+          "channel",
+          "target",
+          "account_id",
+          "retry_count",
+          "last_attempt_at",
+          "last_error",
+          "recovery_state",
+          "platform_send_started_at",
+        ])
+        .orderBy("queue_name", "asc"),
+    ).rows;
+
+    expect(rows).toEqual([
+      {
+        queue_name: "outbound-delivery",
+        id: "outbound-1",
+        entry_kind: "outbound",
+        session_key: "agent:main:desk",
+        channel: "discord",
+        target: "channel-1",
+        account_id: "account-1",
+        retry_count: 3,
+        last_attempt_at: 111,
+        last_error: "network",
+        recovery_state: "unknown_after_send",
+        platform_send_started_at: 222,
+      },
+      {
+        queue_name: "session-delivery",
+        id: "session-1",
+        entry_kind: "agentTurn",
+        session_key: "agent:main:desk",
+        channel: "slack",
+        target: "thread-1",
+        account_id: "workspace-1",
+        retry_count: 2,
+        last_attempt_at: 333,
+        last_error: "rate limited",
+        recovery_state: null,
+        platform_send_started_at: null,
+      },
+    ]);
+    await expectMissingPath(outboundQueueDir);
+    await expectMissingPath(sessionQueueDir);
+  });
+
   it("imports legacy Active Memory session toggles into unified plugin state", async () => {
     const root = await createTempDir();
     const stateDir = path.join(root, ".openclaw");

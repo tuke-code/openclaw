@@ -146,8 +146,7 @@ function registerAgentDatabase(params: {
             size_bytes: sizeBytes,
           })
           .onConflict((conflict) =>
-            conflict.column("agent_id").doUpdateSet({
-              path: params.path,
+            conflict.columns(["agent_id", "path"]).doUpdateSet({
               schema_version: OPENCLAW_AGENT_SCHEMA_VERSION,
               last_seen_at: lastSeenAt,
               size_bytes: sizeBytes,
@@ -166,7 +165,7 @@ export function listOpenClawRegisteredAgentDatabases(
   const db = getNodeSqliteKysely<OpenClawAgentRegistryDatabase>(database.db);
   const rows = executeSqliteQuerySync(
     database.db,
-    db.selectFrom("agent_databases").selectAll().orderBy("agent_id", "asc"),
+    db.selectFrom("agent_databases").selectAll().orderBy("agent_id", "asc").orderBy("path", "asc"),
   ).rows;
   return rows.map((row) => ({
     agentId: normalizeAgentId(row.agent_id),

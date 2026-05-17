@@ -412,6 +412,27 @@ type LegacyDeliveryQueueSpec = {
   sourcePath: string;
 };
 
+type LegacyDeliveryQueueRow = {
+  queue_name: string;
+  id: string;
+  status: "pending" | "failed";
+  entry_kind: string | null;
+  session_key: string | null;
+  channel: string | null;
+  target: string | null;
+  account_id: string | null;
+  retry_count: number;
+  last_attempt_at: number | null;
+  last_error: string | null;
+  recovery_state: string | null;
+  platform_send_started_at: number | null;
+  entry_json: string;
+  enqueued_at: number;
+  updated_at: number;
+  failed_at: number | null;
+  sourcePath: string;
+};
+
 type LegacyCurrentConversationBindingsFile = {
   version?: unknown;
   bindings?: unknown;
@@ -419,17 +440,93 @@ type LegacyCurrentConversationBindingsFile = {
 
 const CURRENT_CONVERSATION_BINDINGS_ID_PREFIX = "generic:";
 
-function readLegacyQueueJson(filePath: string, id: string, enqueuedAt: number): string {
+function readLegacyQueueRecord(
+  filePath: string,
+  id: string,
+  enqueuedAt: number,
+): Record<string, unknown> {
   const parsed = JSON.parse(fs.readFileSync(filePath, "utf-8")) as unknown;
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    return JSON.stringify({ id, enqueuedAt, retryCount: 0 });
+    return { id, enqueuedAt, retryCount: 0 };
   }
-  return JSON.stringify({
+  return {
     id,
     enqueuedAt,
     retryCount: 0,
     ...(parsed as Record<string, unknown>),
-  });
+  };
+}
+
+function legacyQueueText(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function legacyQueueNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? Math.trunc(value) : null;
+}
+
+function legacyQueueRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function legacyQueueNestedText(
+  record: Record<string, unknown>,
+  key: string,
+  field: string,
+): string | null {
+  return legacyQueueText(legacyQueueRecord(record[key])[field]);
+}
+
+function legacyDeliveryQueueRow(params: {
+  spec: LegacyDeliveryQueueSpec;
+  filePath: string;
+  status: "pending" | "failed";
+  enqueuedAt: number;
+  failedAt: number | null;
+}): LegacyDeliveryQueueRow {
+  const id = path.basename(params.filePath, ".json");
+  const record = readLegacyQueueRecord(params.filePath, id, params.enqueuedAt);
+  const sessionKey =
+    legacyQueueText(record.sessionKey) ??
+    legacyQueueNestedText(record, "session", "key") ??
+    legacyQueueNestedText(record, "mirror", "sessionKey");
+  const channel =
+    legacyQueueText(record.channel) ??
+    legacyQueueNestedText(record, "route", "channel") ??
+    legacyQueueNestedText(record, "deliveryContext", "channel");
+  const target =
+    legacyQueueText(record.to) ??
+    legacyQueueNestedText(record, "route", "to") ??
+    legacyQueueNestedText(record, "deliveryContext", "to");
+  const accountId =
+    legacyQueueText(record.accountId) ??
+    legacyQueueNestedText(record, "session", "requesterAccountId") ??
+    legacyQueueNestedText(record, "route", "accountId") ??
+    legacyQueueNestedText(record, "deliveryContext", "accountId");
+  return {
+    queue_name: params.spec.queueName,
+    id,
+    status: params.status,
+    entry_kind:
+      legacyQueueText(record.kind) ??
+      (params.spec.queueName === "outbound-delivery" ? "outbound" : null),
+    session_key: sessionKey,
+    channel,
+    target,
+    account_id: accountId,
+    retry_count: legacyQueueNumber(record.retryCount) ?? 0,
+    last_attempt_at: legacyQueueNumber(record.lastAttemptAt),
+    last_error: legacyQueueText(record.lastError),
+    recovery_state: legacyQueueText(record.recoveryState),
+    platform_send_started_at: legacyQueueNumber(record.platformSendStartedAt),
+    entry_json: JSON.stringify(record),
+    enqueued_at: params.enqueuedAt,
+    updated_at: Date.now(),
+    failed_at: params.failedAt,
+    sourcePath: params.filePath,
+  };
 }
 
 function listLegacyQueueFiles(queueDir: string): {
@@ -462,21 +559,9 @@ function importLegacyDeliveryQueueToSqlite(
   ].flatMap(({ filePath, status }) => {
     try {
       const stat = fs.statSync(filePath);
-      const id = path.basename(filePath, ".json");
       const enqueuedAt = stat.mtimeMs > 0 ? Math.trunc(stat.mtimeMs) : Date.now();
       const failedAt = status === "failed" ? enqueuedAt : null;
-      return [
-        {
-          queue_name: spec.queueName,
-          id,
-          status,
-          entry_json: readLegacyQueueJson(filePath, id, enqueuedAt),
-          enqueued_at: enqueuedAt,
-          updated_at: Date.now(),
-          failed_at: failedAt,
-          sourcePath: filePath,
-        },
-      ];
+      return [legacyDeliveryQueueRow({ spec, filePath, status, enqueuedAt, failedAt })];
     } catch {
       return [];
     }
@@ -494,6 +579,16 @@ function importLegacyDeliveryQueueToSqlite(
             queue_name: row.queue_name,
             id: row.id,
             status: row.status,
+            entry_kind: row.entry_kind,
+            session_key: row.session_key,
+            channel: row.channel,
+            target: row.target,
+            account_id: row.account_id,
+            retry_count: row.retry_count,
+            last_attempt_at: row.last_attempt_at,
+            last_error: row.last_error,
+            recovery_state: row.recovery_state,
+            platform_send_started_at: row.platform_send_started_at,
             entry_json: row.entry_json,
             enqueued_at: row.enqueued_at,
             updated_at: row.updated_at,
@@ -502,6 +597,16 @@ function importLegacyDeliveryQueueToSqlite(
           .onConflict((conflict) =>
             conflict.columns(["queue_name", "id"]).doUpdateSet({
               status: row.status,
+              entry_kind: row.entry_kind,
+              session_key: row.session_key,
+              channel: row.channel,
+              target: row.target,
+              account_id: row.account_id,
+              retry_count: row.retry_count,
+              last_attempt_at: row.last_attempt_at,
+              last_error: row.last_error,
+              recovery_state: row.recovery_state,
+              platform_send_started_at: row.platform_send_started_at,
               entry_json: row.entry_json,
               enqueued_at: row.enqueued_at,
               updated_at: row.updated_at,
