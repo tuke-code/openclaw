@@ -42,25 +42,6 @@ enum DeviceIdentityPaths {
     }
 
     static func legacyStateDirURL() -> URL {
-        #if DEBUG
-        if let testingStateDirURL {
-            return testingStateDirURL
-        }
-        #endif
-
-        for key in self.stateDirEnv {
-            if let raw = getenv(key) {
-                let value = String(cString: raw).trimmingCharacters(in: .whitespacesAndNewlines)
-                if !value.isEmpty {
-                    return URL(fileURLWithPath: value, isDirectory: true)
-                }
-            }
-        }
-
-        if let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
-            return appSupport.appendingPathComponent("OpenClaw", isDirectory: true)
-        }
-
         return self.stateDirURL()
     }
 }

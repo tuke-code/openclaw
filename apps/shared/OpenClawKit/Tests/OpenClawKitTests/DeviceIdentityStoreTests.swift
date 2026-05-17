@@ -96,6 +96,17 @@ struct DeviceIdentityStoreTests {
         }
     }
 
+    @Test("keeps default legacy device state under home openclaw dir")
+    func keepsDefaultLegacyDeviceStateUnderHomeOpenClawDir() throws {
+        try Self.withDefaultStateEnvironment {
+            let expected = FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent(".openclaw", isDirectory: true)
+                .standardizedFileURL
+
+            #expect(DeviceIdentityPaths.legacyStateDirURL().standardizedFileURL == expected)
+        }
+    }
+
     @Test("stores device auth tokens in SQLite without JSON sidecars")
     func storesDeviceAuthTokensInSQLite() throws {
         try Self.withTempStateDir { stateDir in
@@ -246,6 +257,22 @@ struct DeviceIdentityStoreTests {
             try? FileManager.default.removeItem(at: tempDir)
         }
         try body(tempDir)
+    }
+
+    private static func withDefaultStateEnvironment(_ body: () throws -> Void) throws {
+        let previousTestingStateDir = DeviceIdentityPaths.testingStateDirURL
+        let previousStateDir = getenv("OPENCLAW_STATE_DIR").map { String(cString: $0) }
+        DeviceIdentityPaths.testingStateDirURL = nil
+        unsetenv("OPENCLAW_STATE_DIR")
+        defer {
+            DeviceIdentityPaths.testingStateDirURL = previousTestingStateDir
+            if let previousStateDir {
+                setenv("OPENCLAW_STATE_DIR", previousStateDir, 1)
+            } else {
+                unsetenv("OPENCLAW_STATE_DIR")
+            }
+        }
+        try body()
     }
 
     private static func databaseURL(stateDir: URL) -> URL {
