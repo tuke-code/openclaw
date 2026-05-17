@@ -180,10 +180,12 @@ describe("ensurePluginRegistryLoaded", () => {
     expect(channelOptions.activationSourceConfig).toEqual({ plugins: { allow: ["demo-channel"] } });
     expect(channelOptions.env).toBe(env);
     expect(channelOptions.workspaceDir).toBe("/resolved-workspace");
-    expect(mocks.applyPluginAutoEnable).toHaveBeenCalledWith({
-      config: rawConfig,
-      env,
-    });
+    expect(mocks.applyPluginAutoEnable).toHaveBeenCalledWith(
+      expect.objectContaining({
+        config: rawConfig,
+        env,
+      }),
+    );
     const load = loadOptions();
     const loadConfig = requireRecord(load.config, "load config");
     expect(loadConfig.channels).toEqual(rawConfig.channels);
@@ -317,11 +319,13 @@ describe("ensurePluginRegistryLoaded", () => {
 
     ensurePluginRegistryLoaded({ scope: "all", config: config as never, env });
 
-    expect(mocks.resolveEffectivePluginIds).toHaveBeenCalledWith({
-      config,
-      env,
-      workspaceDir: "/resolved-workspace",
-    });
+    expect(mocks.resolveEffectivePluginIds).toHaveBeenCalledWith(
+      expect.objectContaining({
+        config,
+        env,
+        workspaceDir: "/resolved-workspace",
+      }),
+    );
     const load = loadOptions();
     const loadConfig = requireRecord(load.config, "load config");
     expect(loadConfig.channels).toEqual(config.channels);

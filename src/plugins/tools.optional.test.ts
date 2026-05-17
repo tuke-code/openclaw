@@ -2,6 +2,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import { DEFAULT_PLUGIN_TOOLS_ALLOWLIST_ENTRY } from "../agents/tool-policy.js";
 import { resetLogger, setLoggerOverride } from "../logging/logger.js";
 import { loggingState } from "../logging/state.js";
+import { applyTestPluginDefaults } from "./config-state.js";
 import { resolveInstalledPluginIndexPolicyHash } from "./installed-plugin-index-policy.js";
 
 type MockRegistryToolEntry = {
@@ -223,7 +224,7 @@ function resolveAutoEnabledOptionalDemoTools() {
   setOptionalDemoRegistry();
   const { rawContext, autoEnabledConfig } = createAutoEnabledOptionalContext();
   installToolManifestSnapshot({
-    config: autoEnabledConfig,
+    config: rawContext.config,
     plugin: {
       id: "optional-demo",
       origin: "bundled",
@@ -341,7 +342,12 @@ function installToolManifestSnapshots(params: {
         manifestPluginCount: plugins.length,
       },
     } as never,
-    { config: params.config, env: params.env ?? process.env, workspaceDir: "/tmp" },
+    {
+      config: params.config,
+      compatibleConfigs: [applyTestPluginDefaults(params.config, params.env ?? process.env)],
+      env: params.env ?? process.env,
+      workspaceDir: "/tmp",
+    },
   );
 }
 
