@@ -64,6 +64,84 @@ type AllowedValuesCollection = {
 };
 type JsonSchemaLike = Record<string, unknown>;
 
+function cloneMemorySearchWithoutLegacyStorePath(value: unknown): Record<string, unknown> | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const store = isRecord(value.store) ? value.store : null;
+  if (!store || !Object.hasOwn(store, "path")) {
+    return null;
+  }
+  const nextStore = { ...store };
+  delete nextStore.path;
+  return {
+    ...value,
+    store: nextStore,
+  };
+}
+
+function stripLegacyMemorySearchStorePaths(
+  current: Record<string, unknown>,
+): Record<string, unknown> | undefined {
+  let next: Record<string, unknown> | undefined;
+  const root = () => {
+    next ??= { ...current };
+    return next;
+  };
+
+  const topLevelMemorySearch = cloneMemorySearchWithoutLegacyStorePath(current.memorySearch);
+  if (topLevelMemorySearch) {
+    root().memorySearch = topLevelMemorySearch;
+  }
+
+  const currentAgents = isRecord((next ?? current).agents)
+    ? ((next ?? current).agents as Record<string, unknown>)
+    : null;
+  const defaults = isRecord(currentAgents?.defaults) ? currentAgents.defaults : null;
+  const defaultsMemorySearch = cloneMemorySearchWithoutLegacyStorePath(
+    isRecord(defaults) ? defaults.memorySearch : undefined,
+  );
+  if (currentAgents && defaults && defaultsMemorySearch) {
+    root().agents = {
+      ...currentAgents,
+      defaults: {
+        ...defaults,
+        memorySearch: defaultsMemorySearch,
+      },
+    };
+  }
+
+  const agents = isRecord((next ?? current).agents)
+    ? ((next ?? current).agents as Record<string, unknown>)
+    : null;
+  const agentList = agents?.list;
+  if (Array.isArray(agentList)) {
+    let nextList: unknown[] | undefined;
+    agentList.forEach((agent, index) => {
+      if (!isRecord(agent)) {
+        return;
+      }
+      const memorySearch = cloneMemorySearchWithoutLegacyStorePath(agent.memorySearch);
+      if (!memorySearch) {
+        return;
+      }
+      nextList ??= [...agentList];
+      nextList[index] = {
+        ...agent,
+        memorySearch,
+      };
+    });
+    if (nextList) {
+      root().agents = {
+        ...agents,
+        list: nextList,
+      };
+    }
+  }
+
+  return next;
+}
+
 function stripDeprecatedValidationKeys(raw: unknown): unknown {
   if (!isRecord(raw)) {
     return raw;
@@ -83,6 +161,7 @@ function stripDeprecatedValidationKeys(raw: unknown): unknown {
     delete cron.sessionRetention;
     next = { ...(next ?? raw), cron };
   }
+  next = stripLegacyMemorySearchStorePaths(next ?? raw) ?? next;
   return next ?? raw;
 }
 

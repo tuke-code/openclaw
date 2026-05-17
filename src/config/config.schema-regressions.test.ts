@@ -83,6 +83,42 @@ describe("config schema regressions", () => {
     expect(res.ok).toBe(true);
   });
 
+  it("strips legacy memorySearch store paths during validation", () => {
+    const res = validateConfigObject({
+      agents: {
+        defaults: {
+          memorySearch: {
+            store: {
+              path: "/tmp/legacy-default-memory.sqlite",
+              vector: { enabled: false },
+            },
+          },
+        },
+        list: [
+          {
+            id: "ops",
+            memorySearch: {
+              store: {
+                path: "/tmp/legacy-ops-memory.sqlite",
+                fts: { tokenizer: "trigram" },
+              },
+            },
+          },
+        ],
+      },
+    });
+
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.config.agents?.defaults?.memorySearch?.store).toEqual({
+        vector: { enabled: false },
+      });
+      expect(res.config.agents?.list?.[0]?.memorySearch?.store).toEqual({
+        fts: { tokenizer: "trigram" },
+      });
+    }
+  });
+
   it("accepts agents.defaults.startupContext overrides", () => {
     const res = validateConfigObject({
       agents: {
