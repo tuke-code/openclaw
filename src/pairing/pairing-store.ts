@@ -385,7 +385,10 @@ function resolveLegacyAllowFromFallbackPaths(
   resolvedAccountId: string,
 ): string[] {
   if (resolvedAccountId === DEFAULT_ACCOUNT_ID) {
-    return [resolveLegacyAllowFromPath(channel, env)];
+    return [
+      resolveLegacyAllowFromPath(channel, env, DEFAULT_ACCOUNT_ID),
+      resolveLegacyAllowFromPath(channel, env),
+    ];
   }
   return [resolveLegacyAllowFromPath(channel, env, resolvedAccountId)];
 }

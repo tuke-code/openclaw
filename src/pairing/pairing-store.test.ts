@@ -699,11 +699,17 @@ describe("pairing store", () => {
     await withTempStateDir(async (stateDir) => {
       clearOAuthFixtures(stateDir);
       const scopedPath = resolveAllowFromFilePath(stateDir, "telegram", "yy");
+      const defaultScopedPath = resolveAllowFromFilePath(stateDir, "telegram", DEFAULT_ACCOUNT_ID);
       const defaultPath = resolveAllowFromFilePath(stateDir, "telegram");
       fsSync.mkdirSync(path.dirname(scopedPath), { recursive: true });
       fsSync.writeFileSync(
         scopedPath,
         `${JSON.stringify({ version: 1, allowFrom: [" legacy-scoped ", "legacy-scoped"] })}\n`,
+        "utf8",
+      );
+      fsSync.writeFileSync(
+        defaultScopedPath,
+        `${JSON.stringify({ version: 1, allowFrom: ["legacy-default-scoped"] })}\n`,
         "utf8",
       );
       fsSync.writeFileSync(
@@ -715,7 +721,11 @@ describe("pairing store", () => {
       await expect(readChannelAllowFromStore("telegram", process.env, "yy")).resolves.toEqual([
         "legacy-scoped",
       ]);
+      await expect(
+        readChannelAllowFromStore("telegram", process.env, DEFAULT_ACCOUNT_ID),
+      ).resolves.toEqual(["legacy-default-scoped", "legacy-default"]);
       await expect(readChannelAllowFromStore("telegram", process.env)).resolves.toEqual([
+        "legacy-default-scoped",
         "legacy-default",
       ]);
     });
