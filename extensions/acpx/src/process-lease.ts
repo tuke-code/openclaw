@@ -35,11 +35,16 @@ type LeaseStoreEntry = {
 
 const ACPX_PLUGIN_ID = "acpx";
 const PROCESS_LEASES_NAMESPACE = "process-leases";
+const PROCESS_LEASES_MAX_ENTRIES = 900;
 
 const leaseStore = createPluginStateKeyedStore<LeaseStoreEntry>(ACPX_PLUGIN_ID, {
   namespace: PROCESS_LEASES_NAMESPACE,
-  maxEntries: 10_000,
+  maxEntries: PROCESS_LEASES_MAX_ENTRIES,
 });
+
+function isTerminalLeaseState(state: AcpxProcessLeaseState): boolean {
+  return state === "closed" || state === "lost";
+}
 
 function normalizeLease(value: unknown): AcpxProcessLease | undefined {
   if (typeof value !== "object" || value === null) {
@@ -88,7 +93,7 @@ export function createAcpxProcessLeaseStore(): AcpxProcessLeaseStore {
   ): Promise<void> {
     const run = updateQueue.then(async () => {
       const current = await readStoredLeases();
-      const next = mutator(current);
+      const next = mutator(current).filter((lease) => !isTerminalLeaseState(lease.state));
       const nextIds = new Set(next.map((lease) => lease.leaseId));
       await Promise.all([
         ...current

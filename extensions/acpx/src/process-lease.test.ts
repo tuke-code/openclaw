@@ -41,6 +41,23 @@ describe("createAcpxProcessLeaseStore", () => {
       );
     });
   });
+
+  it("deletes terminal leases so long-running gateways do not hit the plugin state cap", async () => {
+    await withOpenClawTestState({ label: "acpx-leases-terminal-prune" }, async () => {
+      const store = createAcpxProcessLeaseStore();
+
+      for (let index = 0; index < 1050; index += 1) {
+        await store.save(makeLease(index));
+        await store.markState(`lease-${index}`, "closed");
+      }
+
+      await store.save(makeLease(1051));
+      expect(await store.load("lease-0")).toBeUndefined();
+      expect((await store.listOpen("gateway-test")).map((lease) => lease.leaseId)).toEqual([
+        "lease-1051",
+      ]);
+    });
+  });
 });
 
 describe("withAcpxLeaseEnvironment", () => {
