@@ -120,6 +120,12 @@ describe("resolveSessionDatabaseTargets", () => {
     ]);
   });
 
+  it("accepts explicit main agent selection when config has no agent list", () => {
+    expect(resolveSessionDatabaseTargets({}, { agent: "main" })).toEqual([
+      expectedTarget({ agentId: "main", env: process.env }),
+    ]);
+  });
+
   it("includes SQLite-registered paths for explicit configured agent selection", async () => {
     await withTempStateHome(async (home) => {
       const env = createEnv(home);
