@@ -10,7 +10,34 @@ import {
 import { __testing, maybeRepairLegacyOAuthSidecarProfiles } from "./doctor-auth-oauth-sidecar.js";
 import type { DoctorPrompter } from "./doctor-prompter.js";
 
+const execFileSyncMock = vi.hoisted(() =>
+  vi.fn<() => string>(() => {
+    throw new Error("unexpected doctor OAuth sidecar Keychain read");
+  }),
+);
+
+vi.mock("node:child_process", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("node:child_process")>()),
+  execFileSync: execFileSyncMock,
+}));
+
 const states: OpenClawTestState[] = [];
+
+function withEnvValue(key: string, value: string | undefined): () => void {
+  const previous = process.env[key];
+  if (value === undefined) {
+    delete process.env[key];
+  } else {
+    process.env[key] = value;
+  }
+  return () => {
+    if (previous === undefined) {
+      delete process.env[key];
+    } else {
+      process.env[key] = previous;
+    }
+  };
+}
 
 function makePrompter(shouldRepair: boolean): DoctorPrompter {
   return {
@@ -74,6 +101,10 @@ function encryptLegacySidecarMaterial(params: {
     tag: cipher.getAuthTag().toString("base64url"),
     ciphertext: ciphertext.toString("base64url"),
   };
+}
+
+function expectReauthWarning(profileId: string, authPath: string): string {
+  return `Could not decrypt legacy OAuth sidecar for ${profileId} in ${authPath}. Re-authenticate with openclaw models auth login --provider openai-codex.`;
 }
 
 afterEach(async () => {
@@ -245,11 +276,89 @@ describe("maybeRepairLegacyOAuthSidecarProfiles", () => {
 
     expect(result.detected).toEqual([authPath]);
     expect(result.changes).toStrictEqual([]);
-    expect(result.warnings).toStrictEqual([
-      `Could not decrypt legacy OAuth sidecar for ${profileId} in ${authPath}; re-authenticate this profile.`,
-    ]);
+    expect(result.warnings).toStrictEqual([expectReauthWarning(profileId, authPath)]);
     expect(fs.existsSync(sidecarPath)).toBe(true);
     expect(JSON.parse(fs.readFileSync(authPath, "utf8"))).toEqual(auth);
+  });
+
+  it("uses macOS Keychain as a read-only fallback while repairing legacy sidecars", async () => {
+    const state = await makeTestState("wrong-seed");
+    const profileId = "openai-codex:default";
+    const ref = {
+      source: "openclaw-credentials" as const,
+      provider: "openai-codex" as const,
+      id: "cccccccccccccccccccccccccccccccc",
+    };
+    const auth = {
+      version: 1,
+      profiles: {
+        [profileId]: {
+          type: "oauth",
+          provider: "openai-codex",
+          oauthRef: ref,
+        },
+      },
+    };
+    const authPath = await state.writeAuthProfiles(auth);
+    await state.writeJson(path.join("credentials", "auth-profiles", `${ref.id}.json`), {
+      version: 1,
+      profileId,
+      provider: "openai-codex",
+      encrypted: encryptLegacySidecarMaterial({
+        ref,
+        profileId,
+        provider: "openai-codex",
+        seed: "keychain-only-seed",
+        material: {
+          access: "access-token",
+          refresh: "refresh-token",
+        },
+      }),
+    });
+    const restoreVitest = withEnvValue("VITEST", undefined);
+    const restoreVitestWorker = withEnvValue("VITEST_WORKER_ID", undefined);
+    const platformSpy = vi.spyOn(process, "platform", "get").mockReturnValue("darwin");
+    execFileSyncMock.mockReturnValueOnce("keychain-only-seed\n");
+    try {
+      const result = await maybeRepairLegacyOAuthSidecarProfiles({
+        cfg: {},
+        prompter: makePrompter(true),
+        now: () => 456,
+      });
+
+      expect(result.detected).toEqual([authPath]);
+      expect(result.changes).toStrictEqual([
+        `Migrated 1 sidecar-backed Codex OAuth profile in ${authPath} to inline credentials (backup: ${authPath}.oauth-ref.456.bak).`,
+      ]);
+      expect(result.warnings).toStrictEqual([]);
+      expect(execFileSyncMock).toHaveBeenCalledWith(
+        "security",
+        [
+          "find-generic-password",
+          "-s",
+          "OpenClaw Auth Profile Secrets",
+          "-a",
+          "oauth-profile-master-key",
+          "-w",
+        ],
+        { encoding: "utf8", timeout: 5000, stdio: ["pipe", "pipe", "pipe"] },
+      );
+      expect(JSON.parse(fs.readFileSync(authPath, "utf8"))).toEqual({
+        version: 1,
+        profiles: {
+          [profileId]: {
+            type: "oauth",
+            provider: "openai-codex",
+            access: "access-token",
+            refresh: "refresh-token",
+          },
+        },
+      });
+    } finally {
+      platformSpy.mockRestore();
+      restoreVitestWorker();
+      restoreVitest();
+    }
   });
 
   it("leaves unreferenced legacy sidecar files in place because external agent dirs may still reference them", async () => {

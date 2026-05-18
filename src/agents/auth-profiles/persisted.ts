@@ -805,7 +805,7 @@ function preserveLegacyOAuthRefsForDoctorMigration(
       const isRuntimeSidecarMaterial =
         options?.runtimeLegacyOAuthSidecarProfileIds?.has(profileId) === true;
       // Untracked inline material may be a real token refresh. Only reread the
-      // sidecar then, and never use Keychain from this save-path check.
+      // sidecar then, preserving the same read-only legacy decryption fallback.
       if (
         !isRuntimeSidecarMaterial &&
         !isUnchangedLegacyOAuthSidecarMaterial({ profileId, rawProfile, credential })
@@ -841,7 +841,6 @@ function isUnchangedLegacyOAuthSidecarMaterial(params: {
     ref: params.rawProfile.oauthRef,
     profileId: params.profileId,
     provider: params.credential.provider,
-    allowKeychainPrompt: false,
   });
   if (!material) {
     return false;

@@ -328,11 +328,11 @@ function readLegacyOAuthSecretKeyFile(env: NodeJS.ProcessEnv): string | undefine
   }
 }
 
-function readLegacyMacOAuthSecretKeychainKey(): string | undefined {
+function readLegacyMacOAuthSecretKeychainKey(env: NodeJS.ProcessEnv): string | undefined {
   if (
     process.platform !== "darwin" ||
-    process.env.VITEST === "true" ||
-    process.env.VITEST_WORKER_ID !== undefined
+    env.VITEST === "true" ||
+    env.VITEST_WORKER_ID !== undefined
   ) {
     return undefined;
   }
@@ -423,7 +423,7 @@ function decryptLegacyOAuthSecretMaterial(params: {
       return material;
     }
   }
-  const keychainSeed = readLegacyMacOAuthSecretKeychainKey();
+  const keychainSeed = readLegacyMacOAuthSecretKeychainKey(params.env);
   if (keychainSeed && !seeds.includes(keychainSeed)) {
     return decryptLegacyOAuthSecretMaterialWithSeed(params, keychainSeed);
   }
@@ -481,6 +481,13 @@ function applyLegacyOAuthSidecarMaterial(params: {
     entry.idToken = params.material.idToken;
   }
   return true;
+}
+
+function formatUndecryptableLegacyOAuthSidecarWarning(
+  profile: LegacyOAuthSidecarProfile,
+  authPath: string,
+): string {
+  return `Could not decrypt legacy OAuth sidecar for ${profile.profileId} in ${shortenHomePath(authPath)}. Re-authenticate with ${formatCliCommand("openclaw models auth login --provider openai-codex")}.`;
 }
 
 function backupLegacyOAuthSidecarStore(authPath: string, now: () => number): string {
@@ -553,9 +560,7 @@ export async function maybeRepairLegacyOAuthSidecarProfiles(params: {
       const material = loadLegacyOAuthSidecarMaterial(profile, env);
       if (!material) {
         unresolvedRefIds.add(profile.ref.id);
-        result.warnings.push(
-          `Could not decrypt legacy OAuth sidecar for ${profile.profileId} in ${shortenHomePath(store.authPath)}; re-authenticate this profile.`,
-        );
+        result.warnings.push(formatUndecryptableLegacyOAuthSidecarWarning(profile, store.authPath));
         continue;
       }
       if (applyLegacyOAuthSidecarMaterial({ raw: store.raw, profile, material })) {
