@@ -455,9 +455,7 @@ describe("createAcpxRuntimeService", () => {
       deps: processCleanupDeps,
     });
     expect(ctx.logger.info).toHaveBeenCalledWith("reaped 2 stale OpenClaw-owned ACPX processes");
-    await expect(processLeaseStore.load("lease-pending")).resolves.toMatchObject({
-      state: "closed",
-    });
+    await expect(processLeaseStore.load("lease-pending")).resolves.toBeUndefined();
 
     await service.stop?.(ctx);
   });
