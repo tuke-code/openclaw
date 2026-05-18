@@ -190,6 +190,7 @@ import { resolveSystemPromptOverride } from "../../system-prompt-override.js";
 import { buildSystemPromptParams } from "../../system-prompt-params.js";
 import { buildSystemPromptReport } from "../../system-prompt-report.js";
 import { appendModelIdentitySystemPrompt } from "../../system-prompt.js";
+import type { PromptMode } from "../../system-prompt.types.js";
 import { resolveAgentTimeoutMs } from "../../timeout.js";
 import {
   buildEmptyExplicitToolAllowlistError,
@@ -263,7 +264,6 @@ import { buildEmbeddedSandboxInfo } from "../sandbox-info.js";
 import { prewarmSessionFile, trackSessionManagerAccess } from "../session-manager-cache.js";
 import { prepareSessionManagerForRun } from "../session-manager-init.js";
 import { resolveEmbeddedRunSkillEntries } from "../skills-runtime.js";
-import type { PromptMode } from "../../system-prompt.types.js";
 import {
   describeEmbeddedAgentStreamStrategy,
   resetEmbeddedAgentBaseStreamFnCacheForTest,
@@ -1628,6 +1628,7 @@ export async function runEmbeddedAttempt(
               return toolSearchCatalogExecutor(toolParams);
             },
             toolConstructionPlan: toolConstructionPlan.codingToolConstructionPlan,
+            coreToolAllowlist: constructionToolsAllow,
             replyToMode: params.replyToMode,
             hasRepliedRef: params.hasRepliedRef,
             modelHasVision: params.model.input?.includes("image") ?? false,
