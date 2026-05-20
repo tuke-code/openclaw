@@ -116,10 +116,15 @@ import {
 } from "../protocol/index.js";
 import { CHAT_SEND_SESSION_KEY_MAX_LENGTH } from "../protocol/schema/primitives.js";
 import { getMaxChatHistoryMessagesBytes } from "../server-constants.js";
-import { persistGatewaySessionLifecycleEvent } from "../session-lifecycle-state.js";
+import {
+  deriveGatewaySessionLifecycleSnapshot,
+  persistGatewaySessionLifecycleEvent,
+  resolveGatewaySessionLifecycleStoreTarget,
+} from "../session-lifecycle-state.js";
 import { readSessionTranscriptIndex } from "../session-transcript-index.fs.js";
 import {
   capArrayByJsonBytes,
+  loadGatewaySessionRow,
   loadSessionEntry,
   resolveGatewayModelSupportsImages,
   resolveGatewaySessionThinkingDefault,
@@ -1754,6 +1759,55 @@ function broadcastChatFinal(params: {
   params.context.agentRunSeq.delete(params.runId);
 }
 
+function hasOtherActiveChatRunForSession(params: {
+  context: Pick<GatewayRequestContext, "chatAbortControllers">;
+  currentController: AbortController;
+  currentRunId: string;
+  rawSessionKey: string;
+  sessionId?: string;
+  sessionKey: string;
+}): boolean {
+  for (const [runId, active] of params.context.chatAbortControllers) {
+    if (runId === params.currentRunId || active.controller === params.currentController) {
+      continue;
+    }
+    if (active.sessionKey === params.rawSessionKey || active.sessionKey === params.sessionKey) {
+      return true;
+    }
+    if (params.sessionId && active.sessionId === params.sessionId) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function buildChatSendSessionLifecycleSnapshot(params: {
+  sessionKey: string;
+  event: Parameters<typeof deriveGatewaySessionLifecycleSnapshot>[0]["event"];
+  hasActiveRun: boolean;
+}) {
+  const row = loadGatewaySessionRow(params.sessionKey);
+  if (!row) {
+    return undefined;
+  }
+  const lifecyclePatch = deriveGatewaySessionLifecycleSnapshot({
+    session: {
+      updatedAt: row.updatedAt ?? undefined,
+      status: row.status,
+      startedAt: row.startedAt,
+      endedAt: row.endedAt,
+      runtimeMs: row.runtimeMs,
+      abortedLastRun: row.abortedLastRun,
+    },
+    event: params.event,
+  });
+  return {
+    ...row,
+    ...lifecyclePatch,
+    hasActiveRun: params.hasActiveRun,
+  };
+}
+
 function isBtwReplyPayload(payload: ReplyPayload | undefined): payload is ReplyPayload & {
   btw: { question: string };
   text: string;
@@ -2921,44 +2975,65 @@ export const chatHandlers: GatewayRequestHandlers = {
             );
           });
           const error = errorShape(ErrorCodes.UNAVAILABLE, String(err));
-          const endedAt = Date.now();
-          const lifecycleStartedAt = activeRunAbort.entry?.startedAtMs ?? now;
-          await persistGatewaySessionLifecycleEvent({
-            sessionKey,
-            event: {
+          if (!activeRunAbort.controller.signal.aborted && !agentRunStarted) {
+            const endedAt = Date.now();
+            const lifecycleStartedAt = activeRunAbort.entry?.startedAtMs ?? now;
+            const lifecycleErrorEvent = {
               ts: endedAt,
               data: {
-                phase: "error",
+                phase: "error" as const,
                 startedAt: lifecycleStartedAt,
                 endedAt,
                 error: String(err),
               },
-            },
-          }).catch((persistErr) => {
-            context.logGateway.warn(
-              `webchat session lifecycle persist failed after error: ${formatForLog(persistErr)}`,
-            );
-          });
-          const sessionEventConnIds = context.getSessionEventSubscriberConnIds();
-          if (sessionEventConnIds.size > 0) {
-            context.broadcastToConnIds(
-              "sessions.changed",
-              {
+            };
+            const lifecycleStoreTarget = resolveGatewaySessionLifecycleStoreTarget({
+              sessionKey: rawSessionKey,
+            });
+            await persistGatewaySessionLifecycleEvent({
+              sessionKey: rawSessionKey,
+              event: lifecycleErrorEvent,
+            }).catch((persistErr) => {
+              context.logGateway.warn(
+                `webchat session lifecycle persist failed after error: ${formatForLog(persistErr)}`,
+              );
+            });
+            const sessionEventConnIds = context.getSessionEventSubscriberConnIds();
+            if (sessionEventConnIds.size > 0) {
+              const hasActiveRun = hasOtherActiveChatRunForSession({
+                context,
+                currentController: activeRunAbort.controller,
+                currentRunId: clientRunId,
+                rawSessionKey,
+                sessionId: backingSessionId,
                 sessionKey,
-                phase: "error",
-                runId: clientRunId,
-                ts: endedAt,
-                updatedAt: endedAt,
-                status: "failed",
-                startedAt: lifecycleStartedAt,
-                endedAt,
-                runtimeMs: Math.max(0, endedAt - lifecycleStartedAt),
-                abortedLastRun: false,
-                hasActiveRun: false,
-              },
-              sessionEventConnIds,
-              { dropIfSlow: true },
-            );
+              });
+              const session = buildChatSendSessionLifecycleSnapshot({
+                sessionKey: lifecycleStoreTarget?.sessionKey ?? rawSessionKey,
+                event: lifecycleErrorEvent,
+                hasActiveRun,
+              });
+              context.broadcastToConnIds(
+                "sessions.changed",
+                {
+                  sessionKey,
+                  ...(session ? { session } : {}),
+                  phase: "error",
+                  runId: clientRunId,
+                  ts: endedAt,
+                  sessionId: session?.sessionId ?? backingSessionId,
+                  updatedAt: endedAt,
+                  status: "failed",
+                  startedAt: lifecycleStartedAt,
+                  endedAt,
+                  runtimeMs: Math.max(0, endedAt - lifecycleStartedAt),
+                  abortedLastRun: false,
+                  hasActiveRun,
+                },
+                sessionEventConnIds,
+                { dropIfSlow: true },
+              );
+            }
           }
           setGatewayDedupeEntry({
             dedupe: context.dedupe,

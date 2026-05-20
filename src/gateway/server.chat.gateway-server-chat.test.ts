@@ -886,8 +886,19 @@ describe("gateway server chat", () => {
           },
         },
       });
+      const subscribeRes = await rpcReq(ws, "sessions.subscribe", {});
+      expect(subscribeRes.ok).toBe(true);
       dispatchInboundMessageMock.mockRejectedValueOnce(new Error("provider rejected request"));
 
+      const changedPromise = onceMessage(
+        ws,
+        (o) =>
+          o.type === "event" &&
+          o.event === "sessions.changed" &&
+          o.payload?.phase === "error" &&
+          o.payload?.runId === "idem-dispatch-error-1",
+        8_000,
+      );
       const errorPromise = onceMessage(
         ws,
         (o) =>
@@ -903,7 +914,21 @@ describe("gateway server chat", () => {
         idempotencyKey: "idem-dispatch-error-1",
       });
       expect(res.ok).toBe(true);
+      const changedEvent = await changedPromise;
       await errorPromise;
+
+      const changedPayload = expectRecordFields(changedEvent.payload, {
+        sessionKey: "agent:main:main",
+        sessionId: "sess-main",
+        status: "failed",
+        hasActiveRun: false,
+      });
+      expectRecordFields(changedPayload.session, {
+        key: "agent:main:main",
+        sessionId: "sess-main",
+        status: "failed",
+        hasActiveRun: false,
+      });
 
       const sessionsRes = await rpcReq<{ sessions?: unknown[] }>(ws, "sessions.list", {});
       expect(sessionsRes.ok).toBe(true);
@@ -913,13 +938,89 @@ describe("gateway server chat", () => {
           typeof row === "object" &&
           (row as { key?: unknown }).key === "agent:main:main",
       );
-      expectRecordFields(session, {
+      const sessionRecord = expectRecordFields(session, {
         status: "failed",
         hasActiveRun: false,
       });
-      expect(typeof session.startedAt).toBe("number");
-      expect(typeof session.endedAt).toBe("number");
-      expect(typeof session.runtimeMs).toBe("number");
+      expect(typeof sessionRecord.startedAt).toBe("number");
+      expect(typeof sessionRecord.endedAt).toBe("number");
+      expect(typeof sessionRecord.runtimeMs).toBe("number");
+    });
+  });
+
+  test("keeps an aborted webchat dispatch rejection from overwriting lifecycle state", async () => {
+    await withMainSessionStore(async () => {
+      await writeSessionStore({
+        entries: {
+          main: {
+            sessionId: "sess-main",
+            updatedAt: 1_000,
+            status: "running",
+            startedAt: 900,
+          },
+        },
+      });
+      let dispatchFinished: (() => void) | undefined;
+      const dispatchFinishedPromise = new Promise<void>((resolve) => {
+        dispatchFinished = resolve;
+      });
+      dispatchInboundMessageMock.mockImplementationOnce(async (...args: unknown[]) => {
+        const [params] = args as [
+          {
+            replyOptions: {
+              abortSignal?: AbortSignal;
+            };
+          },
+        ];
+        await new Promise<void>((resolve) => {
+          if (params.replyOptions.abortSignal?.aborted) {
+            resolve();
+            return;
+          }
+          params.replyOptions.abortSignal?.addEventListener("abort", () => resolve(), {
+            once: true,
+          });
+        });
+        dispatchFinished?.();
+        throw new Error("provider rejected after abort");
+      });
+
+      const abortedPromise = onceMessage(
+        ws,
+        (o) =>
+          o.type === "event" &&
+          o.event === "chat" &&
+          o.payload?.state === "aborted" &&
+          o.payload?.runId === "idem-dispatch-abort-1",
+        8_000,
+      );
+      const res = await rpcReq(ws, "chat.send", {
+        sessionKey: "main",
+        message: "run: pwd",
+        idempotencyKey: "idem-dispatch-abort-1",
+      });
+      expect(res.ok).toBe(true);
+      expect(res.payload?.status).toBe("started");
+      await vi.waitFor(() => {
+        expect(dispatchInboundMessageMock).toHaveBeenCalled();
+      });
+
+      await abortChatRun("idem-dispatch-abort-1");
+      await abortedPromise;
+      await dispatchFinishedPromise;
+
+      await vi.waitFor(async () => {
+        const sessionsRes = await rpcReq<{ sessions?: unknown[] }>(ws, "sessions.list", {});
+        expect(sessionsRes.ok).toBe(true);
+        const session = sessionsRes.payload?.sessions?.find(
+          (row): row is Record<string, unknown> =>
+            Boolean(row) &&
+            typeof row === "object" &&
+            (row as { key?: unknown }).key === "agent:main:main",
+        );
+        expect(session?.hasActiveRun).toBe(false);
+        expect(session?.status).not.toBe("failed");
+      });
     });
   });
 

@@ -1,5 +1,11 @@
-import { updateSessionStoreEntry, type SessionEntry } from "../config/sessions.js";
+import { listAgentIds, resolveDefaultAgentId } from "../agents/agent-scope.js";
+import {
+  resolveAgentMainSessionKey,
+  updateSessionStoreEntry,
+  type SessionEntry,
+} from "../config/sessions.js";
 import type { AgentEventPayload } from "../infra/agent-events.js";
+import { DEFAULT_AGENT_ID, parseAgentSessionKey } from "../routing/session-key.js";
 import { loadSessionEntry } from "./session-utils.js";
 import type { GatewaySessionRow, SessionRunStatus } from "./session-utils.types.js";
 
@@ -143,6 +149,75 @@ export function derivePersistedSessionLifecyclePatch(params: {
   };
 }
 
+function resolveLegacyMainLifecycleStoreKey(params: {
+  canonicalKey: string;
+  cfg: ReturnType<typeof loadSessionEntry>["cfg"];
+  store: ReturnType<typeof loadSessionEntry>["store"];
+}): string | undefined {
+  const parsed = parseAgentSessionKey(params.canonicalKey);
+  if (!parsed) {
+    return undefined;
+  }
+  const mainKey = resolveAgentMainSessionKey({ cfg: params.cfg, agentId: parsed.agentId });
+  if (params.canonicalKey !== mainKey) {
+    return undefined;
+  }
+  const candidates = new Set([
+    `agent:${parsed.agentId}:main`,
+    `agent:${parsed.agentId}:${parsed.rest}`,
+  ]);
+  if (parsed.agentId === resolveDefaultAgentId(params.cfg)) {
+    candidates.add("main");
+    candidates.add(parsed.rest);
+  }
+  if (
+    parsed.agentId === resolveDefaultAgentId(params.cfg) &&
+    !listAgentIds(params.cfg).includes(DEFAULT_AGENT_ID)
+  ) {
+    candidates.add(`agent:${DEFAULT_AGENT_ID}:main`);
+    candidates.add(`agent:${DEFAULT_AGENT_ID}:${parsed.rest}`);
+  }
+  let freshest: { key: string; updatedAt: number } | undefined;
+  const consider = (key: string) => {
+    const entry = params.store[key];
+    if (!entry) {
+      return;
+    }
+    const updatedAt = entry.updatedAt ?? 0;
+    if (!freshest || updatedAt > freshest.updatedAt) {
+      freshest = { key, updatedAt };
+    }
+  };
+
+  for (const candidate of candidates) {
+    consider(candidate);
+    const folded = candidate.toLowerCase();
+    for (const key of Object.keys(params.store)) {
+      if (key.toLowerCase() === folded) {
+        consider(key);
+      }
+    }
+  }
+  return freshest?.key;
+}
+
+export function resolveGatewaySessionLifecycleStoreTarget(params: {
+  sessionKey: string;
+}): { storePath: string; sessionKey: string } | undefined {
+  const sessionEntry = loadSessionEntry(params.sessionKey);
+  const sessionKey = sessionEntry.entry
+    ? (sessionEntry.legacyKey ?? sessionEntry.canonicalKey)
+    : resolveLegacyMainLifecycleStoreKey({
+        canonicalKey: sessionEntry.canonicalKey,
+        cfg: sessionEntry.cfg,
+        store: sessionEntry.store,
+      });
+  if (!sessionKey) {
+    return undefined;
+  }
+  return { storePath: sessionEntry.storePath, sessionKey };
+}
+
 export async function persistGatewaySessionLifecycleEvent(params: {
   sessionKey: string;
   event: LifecycleEventLike;
@@ -152,14 +227,14 @@ export async function persistGatewaySessionLifecycleEvent(params: {
     return;
   }
 
-  const sessionEntry = loadSessionEntry(params.sessionKey);
-  if (!sessionEntry.entry) {
+  const target = resolveGatewaySessionLifecycleStoreTarget({ sessionKey: params.sessionKey });
+  if (!target) {
     return;
   }
 
   await updateSessionStoreEntry({
-    storePath: sessionEntry.storePath,
-    sessionKey: sessionEntry.canonicalKey,
+    storePath: target.storePath,
+    sessionKey: target.sessionKey,
     update: async (entry) =>
       derivePersistedSessionLifecyclePatch({
         entry,

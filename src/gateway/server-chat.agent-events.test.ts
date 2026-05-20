@@ -2110,6 +2110,136 @@ describe("agent event handler", () => {
     expect(agentRunSeq.has("run-terminal-error")).toBe(false);
   });
 
+  it("does not clear a pending terminal lifecycle error for fallback assistant text", () => {
+    vi.useFakeTimers();
+    const { broadcast, clearAgentRunContext, agentRunSeq, handler } = createHarness({
+      resolveSessionKeyForRun: () => "session-terminal-error-text",
+      lifecycleErrorRetryGraceMs: 100,
+    });
+    registerAgentRunContext("run-terminal-error-text", {
+      sessionKey: "session-terminal-error-text",
+    });
+
+    handler({
+      runId: "run-terminal-error-text",
+      seq: 1,
+      stream: "lifecycle",
+      ts: Date.now(),
+      data: { phase: "error", error: "provider rejected request" },
+    });
+    handler({
+      runId: "run-terminal-error-text",
+      seq: 2,
+      stream: "assistant",
+      ts: Date.now(),
+      data: { text: "Agent failed before reply" },
+    });
+
+    expect(clearAgentRunContext).not.toHaveBeenCalled();
+    expect(agentRunSeq.get("run-terminal-error-text")).toBe(2);
+
+    vi.advanceTimersByTime(100);
+
+    const finalPayload = chatBroadcastCalls(broadcast).at(-1)?.[1] as {
+      state?: string;
+      runId?: string;
+    };
+    expect(finalPayload.state).toBe("error");
+    expect(finalPayload.runId).toBe("run-terminal-error-text");
+    expect(clearAgentRunContext).toHaveBeenCalledWith("run-terminal-error-text");
+    expect(agentRunSeq.has("run-terminal-error-text")).toBe(false);
+  });
+
+  it("does not clear a pending terminal lifecycle error for exhausted fallback steps", () => {
+    vi.useFakeTimers();
+    const { broadcast, clearAgentRunContext, agentRunSeq, handler } = createHarness({
+      resolveSessionKeyForRun: () => "session-terminal-error-exhausted",
+      lifecycleErrorRetryGraceMs: 100,
+    });
+    registerAgentRunContext("run-terminal-error-exhausted", {
+      sessionKey: "session-terminal-error-exhausted",
+    });
+
+    handler({
+      runId: "run-terminal-error-exhausted",
+      seq: 1,
+      stream: "lifecycle",
+      ts: Date.now(),
+      data: { phase: "error", error: "provider rejected request" },
+    });
+    handler({
+      runId: "run-terminal-error-exhausted",
+      seq: 2,
+      stream: "lifecycle",
+      ts: Date.now(),
+      data: {
+        phase: "fallback_step",
+        fallbackStepType: "fallback_step",
+        fallbackStepFinalOutcome: "chain_exhausted",
+      },
+    });
+    handler({
+      runId: "run-terminal-error-exhausted",
+      seq: 3,
+      stream: "assistant",
+      ts: Date.now(),
+      data: { text: "Agent failed before reply" },
+    });
+
+    expect(clearAgentRunContext).not.toHaveBeenCalled();
+    expect(agentRunSeq.get("run-terminal-error-exhausted")).toBe(3);
+
+    vi.advanceTimersByTime(100);
+
+    const finalPayload = chatBroadcastCalls(broadcast).at(-1)?.[1] as {
+      state?: string;
+      runId?: string;
+    };
+    expect(finalPayload.state).toBe("error");
+    expect(finalPayload.runId).toBe("run-terminal-error-exhausted");
+    expect(clearAgentRunContext).toHaveBeenCalledWith("run-terminal-error-exhausted");
+    expect(agentRunSeq.has("run-terminal-error-exhausted")).toBe(false);
+  });
+
+  it("clears a pending terminal lifecycle error when fallback continues", () => {
+    vi.useFakeTimers();
+    const { broadcast, clearAgentRunContext, handler } = createHarness({
+      resolveSessionKeyForRun: () => "session-terminal-error-fallback",
+      lifecycleErrorRetryGraceMs: 100,
+    });
+    registerAgentRunContext("run-terminal-error-fallback", {
+      sessionKey: "session-terminal-error-fallback",
+    });
+
+    handler({
+      runId: "run-terminal-error-fallback",
+      seq: 1,
+      stream: "lifecycle",
+      ts: Date.now(),
+      data: { phase: "error", error: "candidate failed" },
+    });
+    handler({
+      runId: "run-terminal-error-fallback",
+      seq: 2,
+      stream: "lifecycle",
+      ts: Date.now(),
+      data: {
+        phase: "fallback_step",
+        fallbackStepType: "fallback_step",
+        fallbackStepFinalOutcome: "next_fallback",
+      },
+    });
+
+    vi.advanceTimersByTime(100);
+
+    expect(
+      chatBroadcastCalls(broadcast).some(
+        ([, payload]) => (payload as { state?: string }).state === "error",
+      ),
+    ).toBe(false);
+    expect(clearAgentRunContext).not.toHaveBeenCalled();
+  });
+
   it("adds detected errorKind to chat lifecycle error payloads", () => {
     const { broadcast, nodeSendToSession, handler } = createHarness({
       resolveSessionKeyForRun: () => "session-detected-error",

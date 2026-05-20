@@ -802,10 +802,22 @@ export function createAgentEventHandler({
     }
   };
 
+  const shouldClearPendingTerminalLifecycleError = (
+    evt: AgentEventPayload,
+    lifecyclePhase: string | null,
+  ) => {
+    if (evt.stream !== "lifecycle" || lifecyclePhase === "error") {
+      return false;
+    }
+    return !(
+      lifecyclePhase === "fallback_step" && evt.data?.fallbackStepFinalOutcome === "chain_exhausted"
+    );
+  };
+
   return (evt: AgentEventPayload) => {
     const lifecyclePhase =
       evt.stream === "lifecycle" && typeof evt.data?.phase === "string" ? evt.data.phase : null;
-    if (evt.stream !== "lifecycle" || lifecyclePhase !== "error") {
+    if (shouldClearPendingTerminalLifecycleError(evt, lifecyclePhase)) {
       clearPendingTerminalLifecycleError(evt.runId);
     }
 
