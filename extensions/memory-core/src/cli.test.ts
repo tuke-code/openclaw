@@ -9,7 +9,11 @@ import {
   spyRuntimeLogs,
 } from "openclaw/plugin-sdk/test-fixtures";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { readShortTermRecallEntries, recordShortTermRecalls } from "./short-term-promotion.js";
+import {
+  readShortTermRecallEntries,
+  recordShortTermRecalls,
+  waitForPendingShortTermWrites,
+} from "./short-term-promotion.js";
 
 const getMemorySearchManager = vi.hoisted(() => vi.fn());
 const getRuntimeConfig = vi.hoisted(() => vi.fn(() => ({})));
@@ -92,7 +96,8 @@ beforeEach(() => {
   }));
 });
 
-afterEach(() => {
+afterEach(async () => {
+  await waitForPendingShortTermWrites();
   vi.restoreAllMocks();
   process.exitCode = undefined;
   setVerbose(false);
@@ -102,6 +107,7 @@ afterAll(async () => {
   if (!fixtureRoot) {
     return;
   }
+  await waitForPendingShortTermWrites();
   await fs.rm(fixtureRoot, { recursive: true, force: true });
 });
 
