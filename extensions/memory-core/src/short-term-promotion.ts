@@ -734,6 +734,13 @@ async function withInProcessShortTermLock<T>(lockPath: string, task: () => Promi
   }
 }
 
+export async function waitForPendingShortTermWrites(): Promise<void> {
+  while (inProcessShortTermLocks.size > 0) {
+    const pending = Array.from(inProcessShortTermLocks.values());
+    await Promise.allSettled(pending);
+  }
+}
+
 async function withShortTermLock<T>(workspaceDir: string, task: () => Promise<T>): Promise<T> {
   const lockPath = resolveLockPath(workspaceDir);
   return withInProcessShortTermLock(lockPath, async () => {
