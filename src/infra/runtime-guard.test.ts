@@ -29,7 +29,7 @@ describe("runtime-guard", () => {
     expect(isAtLeast({ major: 23, minor: 9, patch: 0 }, { major: 24, minor: 0, patch: 0 })).toBe(
       false,
     );
-    expect(isAtLeast({ major: 22, minor: 15, patch: 0 }, { major: 22, minor: 16, patch: 0 })).toBe(
+    expect(isAtLeast({ major: 22, minor: 18, patch: 0 }, { major: 22, minor: 19, patch: 0 })).toBe(
       false,
     );
   });
@@ -37,12 +37,12 @@ describe("runtime-guard", () => {
   it("validates runtime thresholds", () => {
     const nodeOk: RuntimeDetails = {
       kind: "node",
-      version: "22.16.0",
+      version: "22.19.0",
       execPath: "/usr/bin/node",
       pathEnv: "/usr/bin",
     };
     const nodeNewer: RuntimeDetails = { ...nodeOk, version: "24.0.0" };
-    const nodeTooOld: RuntimeDetails = { ...nodeOk, version: "22.15.0" };
+    const nodeTooOld: RuntimeDetails = { ...nodeOk, version: "22.18.9" };
     const unknown: RuntimeDetails = {
       kind: "unknown",
       version: null,
@@ -53,26 +53,26 @@ describe("runtime-guard", () => {
     expect(runtimeSatisfies(nodeNewer)).toBe(true);
     expect(runtimeSatisfies(nodeTooOld)).toBe(false);
     expect(runtimeSatisfies(unknown)).toBe(false);
-    expect(isSupportedNodeVersion("22.16.0")).toBe(true);
-    expect(isSupportedNodeVersion("22.15.0")).toBe(false);
+    expect(isSupportedNodeVersion("22.19.0")).toBe(true);
+    expect(isSupportedNodeVersion("22.18.9")).toBe(false);
     expect(isSupportedNodeVersion(null)).toBe(false);
   });
 
   it("parses simple minimum node engine ranges", () => {
-    expect(parseMinimumNodeEngine(">=22.16.0")).toEqual({ major: 22, minor: 16, patch: 0 });
-    expect(parseMinimumNodeEngine(" >=v22.16.0 ")).toEqual({
+    expect(parseMinimumNodeEngine(">=22.19.0")).toEqual({ major: 22, minor: 19, patch: 0 });
+    expect(parseMinimumNodeEngine(" >=v22.19.0 ")).toEqual({
       major: 22,
-      minor: 16,
+      minor: 19,
       patch: 0,
     });
-    expect(parseMinimumNodeEngine("^22.16.0")).toBeNull();
+    expect(parseMinimumNodeEngine("^22.19.0")).toBeNull();
   });
 
   it("checks node versions against simple engine ranges", () => {
-    expect(nodeVersionSatisfiesEngine("24.0.0", ">=22.16.0")).toBe(true);
-    expect(nodeVersionSatisfiesEngine("22.15.9", ">=22.16.0")).toBe(false);
-    expect(nodeVersionSatisfiesEngine("24.0.0", ">=22.16.0")).toBe(true);
-    expect(nodeVersionSatisfiesEngine("22.16.0", "^22.16.0")).toBeNull();
+    expect(nodeVersionSatisfiesEngine("24.0.0", ">=22.19.0")).toBe(true);
+    expect(nodeVersionSatisfiesEngine("22.18.9", ">=22.19.0")).toBe(false);
+    expect(nodeVersionSatisfiesEngine("24.0.0", ">=22.19.0")).toBe(true);
+    expect(nodeVersionSatisfiesEngine("22.19.0", "^22.19.0")).toBeNull();
   });
 
   it("throws via exit when runtime is too old", () => {
@@ -93,7 +93,7 @@ describe("runtime-guard", () => {
     expect(runtime.error).toHaveBeenCalledOnce();
     expect(runtime.error).toHaveBeenCalledWith(
       [
-        "openclaw requires Node >=22.16.0.",
+        "openclaw requires Node >=22.19.0.",
         "Detected: node 20.0.0 (exec: /usr/bin/node).",
         "PATH searched: /usr/bin",
         "Install Node: https://nodejs.org/en/download",
@@ -112,7 +112,7 @@ describe("runtime-guard", () => {
     const details: RuntimeDetails = {
       ...detectRuntime(),
       kind: "node",
-      version: "22.16.0",
+      version: "22.19.0",
       execPath: "/usr/bin/node",
     };
     expect(assertSupportedRuntime(runtime, details)).toBeUndefined();
@@ -138,7 +138,7 @@ describe("runtime-guard", () => {
     expect(runtime.error).toHaveBeenCalledOnce();
     expect(runtime.error).toHaveBeenCalledWith(
       [
-        "openclaw requires Node >=22.16.0.",
+        "openclaw requires Node >=22.19.0.",
         "Detected: unknown runtime (exec: unknown).",
         "PATH searched: (not set)",
         "Install Node: https://nodejs.org/en/download",

@@ -314,7 +314,7 @@ npm_node_version_is_supported() {
   minor="${minor%%.*}"
   [[ "$major" =~ ^[0-9]+$ ]] || return 1
   [[ "$minor" =~ ^[0-9]+$ ]] || minor=0
-  [[ "$major" -gt 22 ]] || { [[ "$major" -eq 22 ]] && [[ "$minor" -ge 16 ]]; }
+  [[ "$major" -gt 22 ]] || { [[ "$major" -eq 22 ]] && [[ "$minor" -ge 19 ]]; }
 }
 
 npm_bin() {
@@ -561,7 +561,7 @@ install_node() {
   fi
 
   if ! npm_node_version_is_supported "$NODE_VERSION"; then
-    fail "OpenClaw requires Node 22.16.0 or newer; got --node-version ${NODE_VERSION}"
+    fail "OpenClaw requires Node 22.19.0 or newer; got --node-version ${NODE_VERSION}"
   fi
 
   emit_json "{\"event\":\"step\",\"name\":\"node\",\"status\":\"start\",\"version\":\"${NODE_VERSION}\"}"
@@ -596,7 +596,7 @@ install_node() {
   ln -sfn "$dir" "${PREFIX}/tools/node"
 
   if ! npm_node_version_is_supported "$("$(node_bin)" -v 2>/dev/null || echo "")"; then
-    fail "Installed Node ${NODE_VERSION} is below the required 22.16.0 minimum"
+    fail "Installed Node ${NODE_VERSION} is below the required 22.19.0 minimum"
   fi
   if ! "$(node_bin)" -e "require('node:sqlite')" >/dev/null 2>&1; then
     fail "Installed Node ${NODE_VERSION} is missing node:sqlite; re-run with --node-version 22.22.0 (or newer)"
