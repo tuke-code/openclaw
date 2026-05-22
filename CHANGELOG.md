@@ -39,6 +39,7 @@ Docs: https://docs.openclaw.ai
 
 ### Fixes
 
+- WhatsApp: persist inbound message delivery state through plugin state before dispatch and delay read receipts until handler completion, so retryable failures can redeliver without adding a plugin-local disk cache. Thanks @samzong.
 - Gateway/agents: preserve fresh session overrides and metadata when stale cached agent-session entries race with store updates, so subagent model/provider overrides and routing policy survive concurrent writes. (#19328) Thanks @CodeReclaimers.
 - Restore Control UI gateway token pairing [AI]. (#85459) Thanks @pgondhi987.
 - CLI/update: repair managed npm plugin `openclaw` peer links during post-core convergence and reject stale or wrong-target peer links before restart. (#83794) Thanks @fuller-stack-dev.
