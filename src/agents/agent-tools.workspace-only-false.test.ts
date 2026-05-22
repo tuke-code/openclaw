@@ -47,10 +47,13 @@ describe("FS tools with workspaceOnly=false", () => {
       expect(hasToolError(result)).toBe(true);
       expect(JSON.stringify(result.content)).toMatch(/denied|mutation policy/i);
     } catch (error) {
-      const text =
-        error instanceof Error
-          ? `${(error as { code?: unknown }).code ?? ""} ${error.message}`
-          : String(error);
+      if (!(error instanceof Error)) {
+        expect(String(error)).toMatch(/denied-path|denied|mutation policy/i);
+        return;
+      }
+
+      const code = (error as { code?: unknown }).code;
+      const text = `${typeof code === "string" ? code : ""} ${error.message}`;
       expect(text).toMatch(/denied-path|denied|mutation policy/i);
     }
   };
