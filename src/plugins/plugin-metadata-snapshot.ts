@@ -45,6 +45,11 @@ type PersistedRegistryMemoState = {
   watchedFiles: readonly string[];
 };
 
+type PersistedRegistryMemoStateLookup = {
+  state: PersistedRegistryMemoState;
+  watchedFilesHashVerified: boolean;
+};
+
 const PLUGIN_METADATA_MEMO_CAPACITY = 8;
 const pluginMetadataSnapshotMemo = new Map<string, PluginMetadataSnapshotMemo>();
 
@@ -70,7 +75,12 @@ function findFastPathRegistryState(
 ): PersistedRegistryMemoState | undefined {
   for (const entry of pluginMetadataSnapshotMemo.values()) {
     const state = entry.registryState;
-    if (state && state.contextHash === contextHash && state.fastHash === fastHash) {
+    if (
+      state &&
+      state.contextHash === contextHash &&
+      state.fastHash === fastHash &&
+      hashWatchedFiles(state.watchedFiles) === state.watchedFilesHash
+    ) {
       return state;
     }
   }
@@ -524,7 +534,7 @@ function resolvePersistedRegistryMemoStateForLookup(params: {
   env: NodeJS.ProcessEnv;
   preferPersisted?: boolean;
   stateDir?: string;
-}): PersistedRegistryMemoState {
+}): PersistedRegistryMemoStateLookup {
   const fastFingerprint = resolvePersistedRegistryFastMemoFingerprint(params);
   const fastHash = hashJson(fastFingerprint);
   const contextHash = resolvePersistedRegistryMemoContextHash({
@@ -533,9 +543,15 @@ function resolvePersistedRegistryMemoStateForLookup(params: {
   });
   const fastPath = findFastPathRegistryState(fastHash, contextHash);
   if (fastPath) {
-    return fastPath;
+    return {
+      state: fastPath,
+      watchedFilesHashVerified: true,
+    };
   }
-  return resolvePersistedRegistryMemoState(params);
+  return {
+    state: resolvePersistedRegistryMemoState(params),
+    watchedFilesHashVerified: true,
+  };
 }
 
 function computePluginMetadataSnapshotMemoKey(params: {
@@ -721,17 +737,19 @@ export function loadPluginMetadataSnapshot(
 ): PluginMetadataSnapshot {
   const activeTimelineSpan = getActiveDiagnosticsTimelineSpan();
   const env = params.env ?? process.env;
-  const registryState = resolvePersistedRegistryMemoStateForLookup({
+  const registryStateLookup = resolvePersistedRegistryMemoStateForLookup({
     env,
     stateDir: params.stateDir ? resolveUserPath(params.stateDir, env) : undefined,
     preferPersisted: params.preferPersisted,
   });
+  const registryState = registryStateLookup.state;
   const memoKey = computePluginMetadataSnapshotMemoKey({ params, registryState });
   const cached = pluginMetadataSnapshotMemo.get(memoKey);
   const cachedState = cached?.registryState;
   const cachedIsFresh =
     cached !== undefined &&
     (cachedState === undefined ||
+      (cachedState === registryState && registryStateLookup.watchedFilesHashVerified) ||
       hashWatchedFiles(cachedState.watchedFiles) === cachedState.watchedFilesHash);
   if (cached && cachedIsFresh) {
     pluginMetadataSnapshotMemo.delete(memoKey);
