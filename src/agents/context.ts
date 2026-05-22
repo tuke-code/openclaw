@@ -219,7 +219,7 @@ function primeConfiguredContextWindows(): OpenClawConfig | undefined {
   }
 }
 
-function ensureContextWindowCacheLoaded(): Promise<void> {
+export function ensureContextWindowCacheLoaded(): Promise<void> {
   if (CONTEXT_WINDOW_RUNTIME_STATE.loadPromise) {
     return CONTEXT_WINDOW_RUNTIME_STATE.loadPromise;
   }
