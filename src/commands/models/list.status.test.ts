@@ -636,7 +636,7 @@ describe("modelsStatusCommand auth overview", () => {
           status: "usable",
           effective: {
             kind: "profiles",
-            detail: "/tmp/openclaw-agent/auth-profiles.json",
+            detail: "/tmp/openclaw.sqlite#table/auth_profile_stores//tmp/openclaw-agent",
           },
         },
       ]);
