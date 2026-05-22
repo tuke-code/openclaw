@@ -1040,7 +1040,9 @@ export async function handleToolExecutionEnd(
     ctx.state.successfulCronAdds += 1;
   }
   if (!isToolError && toolName === HEARTBEAT_RESPONSE_TOOL_NAME) {
-    const response = normalizeHeartbeatToolResponse(result?.details);
+    const details =
+      result && typeof result === "object" ? (result as { details?: unknown }).details : undefined;
+    const response = normalizeHeartbeatToolResponse(details);
     if (response) {
       ctx.state.heartbeatToolResponse = response;
     }

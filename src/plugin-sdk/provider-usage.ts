@@ -16,7 +16,7 @@ export {
 export {
   clampPercent,
   PROVIDER_LABELS,
-  resolveLegacyPiAgentAccessToken,
+  resolveLegacyAgentAccessToken,
 } from "../infra/provider-usage.shared.js";
 export {
   buildUsageErrorSnapshot,

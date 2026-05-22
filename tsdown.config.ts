@@ -241,7 +241,6 @@ function buildCoreDistEntries(): Record<string, string> {
     "plugins/memory-state": "src/plugins/memory-state.ts",
     "subagent-registry.runtime": "src/agents/subagent-registry.runtime.ts",
     "task-registry-control.runtime": "src/tasks/task-registry-control.runtime.ts",
-    "agents/pi-model-discovery-runtime": "src/agents/pi-model-discovery-runtime.ts",
     "link-understanding/apply.runtime": "src/link-understanding/apply.runtime.ts",
     "media-understanding/apply.runtime": "src/media-understanding/apply.runtime.ts",
     "commands/doctor/shared/plugin-registry-migration":
@@ -265,6 +264,7 @@ function buildCoreDistEntries(): Record<string, string> {
     "telegram/token": bundledPluginFile("telegram", "src/token.ts"),
     "plugins/build-smoke-entry": "src/plugins/build-smoke-entry.ts",
     "plugins/runtime/index": "src/plugins/runtime/index.ts",
+    "llm/models.generated": "src/llm/models.generated.ts",
     "llm-slug-generator": "src/hooks/llm-slug-generator.ts",
     "mcp/plugin-tools-serve": "src/mcp/plugin-tools-serve.ts",
   };
@@ -274,13 +274,13 @@ function buildDockerE2eHarnessEntries(): Record<string, string> {
   return {
     // Mounted Docker harnesses run against the npm tarball image, so any
     // internal module they assert must have a stable package dist entry.
-    "agents/pi-bundle-mcp-materialize": "src/agents/pi-bundle-mcp-materialize.ts",
-    "agents/pi-bundle-mcp-runtime": "src/agents/pi-bundle-mcp-runtime.ts",
-    "agents/pi-embedded-runner/effective-tool-policy":
-      "src/agents/pi-embedded-runner/effective-tool-policy.ts",
-    "agents/pi-embedded-runner/tool-split": "src/agents/pi-embedded-runner/tool-split.ts",
-    "agents/pi-embedded-runner/run/runtime-context-prompt":
-      "src/agents/pi-embedded-runner/run/runtime-context-prompt.ts",
+    "agents/agent-bundle-mcp-materialize": "src/agents/agent-bundle-mcp-materialize.ts",
+    "agents/agent-bundle-mcp-runtime": "src/agents/agent-bundle-mcp-runtime.ts",
+    "agents/embedded-agent-runner/effective-tool-policy":
+      "src/agents/embedded-agent-runner/effective-tool-policy.ts",
+    "agents/embedded-agent-runner/tool-split": "src/agents/embedded-agent-runner/tool-split.ts",
+    "agents/embedded-agent-runner/run/runtime-context-prompt":
+      "src/agents/embedded-agent-runner/run/runtime-context-prompt.ts",
     "auto-reply/reply/commands-crestodian": "src/auto-reply/reply/commands-crestodian.ts",
     "cli/run-main": "src/cli/run-main.ts",
     "commitments/runtime": "src/commitments/runtime.ts",
