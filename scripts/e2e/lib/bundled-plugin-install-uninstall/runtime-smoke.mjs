@@ -343,7 +343,7 @@ async function retryRpcCall(method, params, options) {
 }
 
 function isRetryableGatewayCallError(error) {
-  const text = error instanceof Error ? error.message : String(error);
+  const text = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
   return (
     text.includes("gateway starting") ||
     text.includes("gateway closed") ||
@@ -351,6 +351,8 @@ function isRetryableGatewayCallError(error) {
     text.includes("GatewayTransportError") ||
     text.includes("ECONNREFUSED") ||
     text.includes("ECONNRESET") ||
+    text.includes("TimeoutError") ||
+    text.includes("aborted due to timeout") ||
     text.includes("fetch failed")
   );
 }

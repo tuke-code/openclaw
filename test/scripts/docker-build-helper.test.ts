@@ -291,6 +291,7 @@ describe("docker build helper", () => {
     expect(runtimeSmoke).toContain("process.env.OPENCLAW_BUNDLED_PLUGIN_RUNTIME_HTTP_READY_MS");
     expect(runtimeSmoke).toContain("retryHttpProbe");
     expect(runtimeSmoke).toContain("ECONNRESET");
+    expect(runtimeSmoke).toContain("TimeoutError");
     expect(runtimeSmoke).toContain("900000");
     expect(sweep).toContain("read -r plugin_id plugin_dir requires_config");
     expect(sweep).toContain('node "$OPENCLAW_ENTRY" plugins install "$plugin_id"');
