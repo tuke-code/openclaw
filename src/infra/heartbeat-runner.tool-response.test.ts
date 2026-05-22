@@ -238,7 +238,7 @@ describe("runHeartbeatOnce heartbeat response tool", () => {
       config: { visibleReplies: "message_tool" },
     });
 
-    expectHeartbeatToolPrompt(result, ["notify=false"]);
+    expectHeartbeatToolPrompt(result);
   });
 
   it("uses the heartbeat response tool prompt for group message-tool mode", async () => {

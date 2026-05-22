@@ -43,6 +43,11 @@ vi.mock("../process/exec.js", () => ({
   runCommandWithTimeout: processMocks.runCommandWithTimeout,
 }));
 
+vi.mock("../infra/fs-safe.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../infra/fs-safe.js")>();
+  return { ...actual };
+});
+
 import { agentsDeleteCommand } from "./agents.commands.delete.js";
 
 const runtime = createTestRuntime();
