@@ -773,10 +773,25 @@ function resolveAttemptStreamAuthProfileId(params: {
 
 export const __testing = {
   cancelQueuedSteeringMessage,
+  resolveEmbeddedAttemptSessionWriteLockOptions,
   steerAndWaitForTranscriptCommit,
   resolveAttemptStreamAuthProfileId,
 };
 export { __testing as testing };
+
+function resolveEmbeddedAttemptSessionWriteLockOptions(params: {
+  config?: unknown;
+  compactionTimeoutMs: number;
+  env?: NodeJS.ProcessEnv;
+}): { timeoutMs: number; staleMs: number; maxHoldMs: number } {
+  void params.config;
+  void params.env;
+  return {
+    timeoutMs: 60_000,
+    staleMs: 1_800_000,
+    maxHoldMs: params.compactionTimeoutMs + 120_000,
+  };
+}
 
 async function steerAndWaitForTranscriptCommit(
   activeSession: EmbeddedPiActiveSessionSteerTarget,
