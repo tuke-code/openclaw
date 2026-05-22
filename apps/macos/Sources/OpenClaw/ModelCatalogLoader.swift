@@ -99,7 +99,7 @@ enum ModelCatalogLoader {
         ]
         for root in roots {
             let candidate = root
-                .appendingPathComponent("node_modules/@earendil-works/pi-ai/dist/models.generated.js")
+                .appendingPathComponent("dist/llm/models.generated.js")
             if FileManager().isReadableFile(atPath: candidate.path) {
                 return candidate.path
             }

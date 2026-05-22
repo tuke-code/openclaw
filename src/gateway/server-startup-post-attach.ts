@@ -461,7 +461,7 @@ async function prewarmConfiguredPrimaryModel(params: {
     import("../agents/agent-scope.js"),
     import("../agents/defaults.js"),
     import("../agents/model-selection.js"),
-    import("../agents/pi-embedded-runner/runtime.js"),
+    import("../agents/embedded-agent-runner/runtime.js"),
   ]);
   const { provider, model } = resolveConfiguredModelRef({
     cfg: params.cfg,
@@ -472,7 +472,7 @@ async function prewarmConfiguredPrimaryModel(params: {
     return;
   }
   const runtime = resolveEmbeddedAgentRuntime();
-  if (runtime !== "auto" && runtime !== "pi") {
+  if (runtime !== "auto" && runtime !== "openclaw") {
     return;
   }
   // Keep startup prewarm metadata-only; resolving models can import provider runtimes and block readiness.

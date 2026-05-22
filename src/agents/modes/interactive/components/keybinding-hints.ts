@@ -30,7 +30,9 @@ export function formatKeyText(key: string, options: KeyTextFormatOptions = {}): 
 }
 
 function formatKeys(keys: KeyId[], options: KeyTextFormatOptions = {}): string {
-  if (keys.length === 0) return "";
+  if (keys.length === 0) {
+    return "";
+  }
   return formatKeyText(keys.join("/"), options);
 }
 

@@ -157,7 +157,7 @@ export function wrapEditToolWithRecovery(
       toolCallId: string,
       params: unknown,
       signal: AbortSignal | undefined,
-      onUpdate?: AgentToolUpdateCallback<unknown>,
+      onUpdate?: AgentToolUpdateCallback,
     ) => {
       const { pathParam, edits } = readEditToolParams(params);
       const absolutePath =

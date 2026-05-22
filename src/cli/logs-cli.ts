@@ -12,7 +12,6 @@ import { formatErrorMessage } from "../infra/errors.js";
 import { readConfiguredLogTail } from "../logging/log-tail.js";
 import { parseLogLine } from "../logging/parse-log-line.js";
 import { formatTimestamp, isValidTimeZone } from "../logging/timestamps.js";
-import { createLazyImportLoader } from "../shared/lazy-promise.js";
 import { normalizeLowercaseStringOrEmpty } from "../shared/string-coerce.js";
 import { formatDocsLink } from "../terminal/links.js";
 import { clearActiveProgressLine } from "../terminal/progress-line.js";
@@ -20,16 +19,6 @@ import { createSafeStreamWriter } from "../terminal/stream-writer.js";
 import { colorize, isRich, theme } from "../terminal/theme.js";
 import { formatCliCommand } from "./command-format.js";
 import { addGatewayClientOptions, callGatewayFromCli } from "./gateway-rpc.js";
-
-type LogsCliRuntimeModule = typeof import("./logs-cli.runtime.js");
-
-const logsCliRuntimeLoader = createLazyImportLoader<LogsCliRuntimeModule>(
-  () => import("./logs-cli.runtime.js"),
-);
-
-async function loadLogsCliRuntime(): Promise<LogsCliRuntimeModule> {
-  return logsCliRuntimeLoader.load();
-}
 
 type LogsTailPayload = {
   file?: string;
@@ -266,12 +255,11 @@ async function emitGatewayError(
   emitJsonLine: (payload: Record<string, unknown>, toStdErr?: boolean) => boolean,
   errorLine: (text: string) => boolean,
 ) {
-  const runtime = await loadLogsCliRuntime();
   const message = "Gateway not reachable. Is it running and accessible?";
   const hint = `Hint: run \`${formatCliCommand("openclaw doctor")}\`.`;
   const errorText = formatErrorMessage(err);
 
-  const details = runtime.buildGatewayConnectionDetails({ url: opts.url });
+  const details = buildGatewayConnectionDetails({ url: opts.url });
   if (mode === "json") {
     if (
       !emitJsonLine(

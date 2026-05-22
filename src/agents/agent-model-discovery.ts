@@ -1,5 +1,5 @@
 import path from "node:path";
-import type { Api, Model } from "openclaw/plugin-sdk/llm";
+import type { Model } from "openclaw/plugin-sdk/llm";
 import { normalizeModelCompat } from "../plugins/provider-model-compat.js";
 import {
   applyProviderResolvedModelCompatWithPlugins,
@@ -22,7 +22,7 @@ import {
 
 export { AuthStorage, ModelRegistry };
 
-type ProviderRuntimeModelLike = Model<Api> & {
+type ProviderRuntimeModelLike = Model & {
   contextTokens?: number;
 };
 
@@ -86,7 +86,7 @@ export function normalizeDiscoveredAgentModel<T>(value: T, agentDir: string): T 
   ) {
     return value;
   }
-  return normalizeModelCompat(transportNormalized as Model<Api>) as T;
+  return normalizeModelCompat(transportNormalized as Model) as T;
 }
 
 function createOpenClawModelRegistry(
@@ -101,23 +101,23 @@ function createOpenClawModelRegistry(
   const find = registry.find.bind(registry);
   const refresh = registry.refresh.bind(registry);
   const providerFilter = options?.providerFilter ? normalizeProviderId(options.providerFilter) : "";
-  const matchesProviderFilter = (entry: Model<Api>) =>
+  const matchesProviderFilter = (entry: Model) =>
     !providerFilter || normalizeProviderId(entry.provider) === providerFilter;
   const shouldNormalize = options?.normalizeModels !== false;
-  const findCache = new Map<string, Model<Api> | undefined>();
-  const normalizeEntry = (entry: Model<Api>) =>
+  const findCache = new Map<string, Model | undefined>();
+  const normalizeEntry = (entry: Model) =>
     shouldNormalize ? normalizeDiscoveredAgentModel(entry, agentDir) : entry;
 
   registry.getAll = () => {
-    const entries = getAll().filter((entry: Model<Api>) => matchesProviderFilter(entry));
+    const entries = getAll().filter((entry: Model) => matchesProviderFilter(entry));
     return shouldNormalize
-      ? entries.map((entry: Model<Api>) => normalizeDiscoveredAgentModel(entry, agentDir))
+      ? entries.map((entry: Model) => normalizeDiscoveredAgentModel(entry, agentDir))
       : entries;
   };
   registry.getAvailable = () => {
-    const entries = getAvailable().filter((entry: Model<Api>) => matchesProviderFilter(entry));
+    const entries = getAvailable().filter((entry: Model) => matchesProviderFilter(entry));
     return shouldNormalize
-      ? entries.map((entry: Model<Api>) => normalizeDiscoveredAgentModel(entry, agentDir))
+      ? entries.map((entry: Model) => normalizeDiscoveredAgentModel(entry, agentDir))
       : entries;
   };
   registry.find = (provider: string, modelId: string) => {

@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import type { Api, Model } from "openclaw/plugin-sdk/llm";
+import type { Model } from "openclaw/plugin-sdk/llm";
 import { parseGeminiAuth } from "../../infra/gemini-auth.js";
 import { normalizeGoogleApiBaseUrl } from "../../infra/google-api-base-url.js";
 import { streamWithPayloadPatch } from "../../llm/providers/stream-wrappers/stream-payload-utils.js";
@@ -26,7 +26,7 @@ type GooglePromptCacheSessionManager = {
   appendCustomEntry(customType: string, data?: unknown): void | Promise<void>;
   getEntries(): CustomEntryLike[];
 };
-type GooglePromptCacheModel = Model<Api> & {
+type GooglePromptCacheModel = Model & {
   baseUrl?: string;
   headers?: Record<string, string>;
   provider: string;

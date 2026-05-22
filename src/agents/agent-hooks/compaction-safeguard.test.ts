@@ -86,7 +86,7 @@ function stubSessionManager(): ExtensionContext["sessionManager"] {
   return stub;
 }
 
-function createAnthropicModelFixture(overrides: Partial<Model<Api>> = {}): Model<Api> {
+function createAnthropicModelFixture(overrides: Partial<Model> = {}): Model {
   return {
     id: "claude-opus-4-5",
     name: "Claude Opus 4.5",

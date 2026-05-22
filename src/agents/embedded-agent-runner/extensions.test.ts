@@ -21,7 +21,7 @@ function buildSafeguardFactories(cfg: OpenClawConfig) {
   const model = {
     id: "claude-sonnet-4-20250514",
     contextWindow: 200_000,
-  } as Model<Api>;
+  } as Model;
 
   const factories = buildEmbeddedExtensionFactories({
     cfg,
@@ -115,7 +115,7 @@ describe("buildEmbeddedExtensionFactories", () => {
       sessionManager: {} as SessionManager,
       provider: "litellm",
       modelId: "claude-sonnet-4-6",
-      model: { api: "anthropic-messages", contextWindow: 200_000 } as Model<Api>,
+      model: { api: "anthropic-messages", contextWindow: 200_000 } as Model,
     });
 
     expect(factories).toContain(contextPruningExtension);

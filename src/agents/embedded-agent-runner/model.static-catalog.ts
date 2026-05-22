@@ -1,4 +1,4 @@
-import type { Api, Model } from "openclaw/plugin-sdk/llm";
+import type { Model } from "openclaw/plugin-sdk/llm";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { planManifestModelCatalogRows } from "../../model-catalog/manifest-planner.js";
 import type { NormalizedModelCatalogRow } from "../../model-catalog/types.js";
@@ -24,7 +24,7 @@ function rowMatchesModel(params: {
   );
 }
 
-function modelFromStaticCatalogRow(row: NormalizedModelCatalogRow): Model<Api> {
+function modelFromStaticCatalogRow(row: NormalizedModelCatalogRow): Model {
   return {
     id: row.id,
     name: row.name || row.id,
@@ -39,7 +39,7 @@ function modelFromStaticCatalogRow(row: NormalizedModelCatalogRow): Model<Api> {
     maxTokens: row.maxTokens,
     headers: row.headers,
     compat: row.compat,
-  } as Model<Api>;
+  } as Model;
 }
 
 export function resolveBundledStaticCatalogModel(params: {
@@ -48,7 +48,7 @@ export function resolveBundledStaticCatalogModel(params: {
   cfg?: OpenClawConfig;
   workspaceDir?: string;
   env?: NodeJS.ProcessEnv;
-}): Model<Api> | undefined {
+}): Model | undefined {
   const provider = normalizeProviderId(params.provider);
   if (!provider || !params.modelId.trim()) {
     return undefined;

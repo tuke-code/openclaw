@@ -73,7 +73,7 @@ describe("resolveCliRuntimeExecutionProvider", () => {
         cfg: createAnthropicAuthConfig({
           order: ["anthropic:claude-cli"],
           models: {
-            "anthropic/opus-4.7": { agentRuntime: { id: "pi" } },
+            "anthropic/opus-4.7": { agentRuntime: { id: "openclaw" } },
           },
         }),
         provider: "anthropic",

@@ -72,16 +72,16 @@ export const withTimeout = async <T>(work: Promise<T>, ms: number, fallback: T):
   }
 };
 
-function resolveLegacyPiAgentAuthPath(env: NodeJS.ProcessEnv): string {
+function resolveLegacyAgentAuthPath(env: NodeJS.ProcessEnv): string {
   return path.join(resolveRequiredHomeDir(env, os.homedir), ".pi", "agent", "auth.json");
 }
 
-export function resolveLegacyPiAgentAccessToken(
+export function resolveLegacyAgentAccessToken(
   env: NodeJS.ProcessEnv,
   providerIds: string[],
 ): string | undefined {
   try {
-    const authPath = resolveLegacyPiAgentAuthPath(env);
+    const authPath = resolveLegacyAgentAuthPath(env);
     if (!fs.existsSync(authPath)) {
       return undefined;
     }

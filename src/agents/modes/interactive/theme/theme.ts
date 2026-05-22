@@ -169,9 +169,9 @@ function hexToRgb(hex: string): { r: number; g: number; b: number } {
   if (cleaned.length !== 6) {
     throw new Error(`Invalid hex color: ${hex}`);
   }
-  const r = parseInt(cleaned.substring(0, 2), 16);
-  const g = parseInt(cleaned.substring(2, 4), 16);
-  const b = parseInt(cleaned.substring(4, 6), 16);
+  const r = Number.parseInt(cleaned.slice(0, 2), 16);
+  const g = Number.parseInt(cleaned.slice(2, 4), 16);
+  const b = Number.parseInt(cleaned.slice(4, 6), 16);
   if (Number.isNaN(r) || Number.isNaN(g) || Number.isNaN(b)) {
     throw new Error(`Invalid hex color: ${hex}`);
   }
@@ -264,31 +264,37 @@ function hexTo256(hex: string): number {
 }
 
 function fgAnsi(color: string | number, mode: ColorMode): string {
-  if (color === "") return "\x1b[39m";
-  if (typeof color === "number") return `\x1b[38;5;${color}m`;
+  if (color === "") {
+    return "\x1b[39m";
+  }
+  if (typeof color === "number") {
+    return `\x1b[38;5;${color}m`;
+  }
   if (color.startsWith("#")) {
     if (mode === "truecolor") {
       const { r, g, b } = hexToRgb(color);
       return `\x1b[38;2;${r};${g};${b}m`;
-    } else {
-      const index = hexTo256(color);
-      return `\x1b[38;5;${index}m`;
     }
+    const index = hexTo256(color);
+    return `\x1b[38;5;${index}m`;
   }
   throw new Error(`Invalid color value: ${color}`);
 }
 
 function bgAnsi(color: string | number, mode: ColorMode): string {
-  if (color === "") return "\x1b[49m";
-  if (typeof color === "number") return `\x1b[48;5;${color}m`;
+  if (color === "") {
+    return "\x1b[49m";
+  }
+  if (typeof color === "number") {
+    return `\x1b[48;5;${color}m`;
+  }
   if (color.startsWith("#")) {
     if (mode === "truecolor") {
       const { r, g, b } = hexToRgb(color);
       return `\x1b[48;2;${r};${g};${b}m`;
-    } else {
-      const index = hexTo256(color);
-      return `\x1b[48;5;${index}m`;
     }
+    const index = hexTo256(color);
+    return `\x1b[48;5;${index}m`;
   }
   throw new Error(`Invalid color value: ${color}`);
 }
@@ -356,13 +362,17 @@ export class Theme {
 
   fg(color: ThemeColor, text: string): string {
     const ansi = this.fgColors.get(color);
-    if (!ansi) throw new Error(`Unknown theme color: ${color}`);
+    if (!ansi) {
+      throw new Error(`Unknown theme color: ${color}`);
+    }
     return `${ansi}${text}\x1b[39m`; // Reset only foreground color
   }
 
   bg(color: ThemeBg, text: string): string {
     const ansi = this.bgColors.get(color);
-    if (!ansi) throw new Error(`Unknown theme background color: ${color}`);
+    if (!ansi) {
+      throw new Error(`Unknown theme background color: ${color}`);
+    }
     return `${ansi}${text}\x1b[49m`; // Reset only background color
   }
 
@@ -388,13 +398,17 @@ export class Theme {
 
   getFgAnsi(color: ThemeColor): string {
     const ansi = this.fgColors.get(color);
-    if (!ansi) throw new Error(`Unknown theme color: ${color}`);
+    if (!ansi) {
+      throw new Error(`Unknown theme color: ${color}`);
+    }
     return ansi;
   }
 
   getBgAnsi(color: ThemeBg): string {
     const ansi = this.bgColors.get(color);
-    if (!ansi) throw new Error(`Unknown theme background color: ${color}`);
+    if (!ansi) {
+      throw new Error(`Unknown theme background color: ${color}`);
+    }
     return ansi;
   }
 
@@ -462,7 +476,7 @@ export function getAvailableThemes(): string[] {
   for (const name of registeredThemes.keys()) {
     themes.add(name);
   }
-  return Array.from(themes).sort();
+  return Array.from(themes).toSorted();
 }
 
 export interface ThemeInfo {
@@ -498,7 +512,7 @@ export function getAvailableThemesWithPaths(): ThemeInfo[] {
     }
   }
 
-  return result.sort((a, b) => a.name.localeCompare(b.name));
+  return result.toSorted((a, b) => a.name.localeCompare(b.name));
 }
 
 function parseThemeJson(label: string, json: unknown): ThemeJson {
@@ -525,7 +539,7 @@ function parseThemeJson(label: string, json: unknown): ThemeJson {
     if (missingColors.size > 0) {
       errorMessage += "\nMissing required color tokens:\n";
       errorMessage += Array.from(missingColors)
-        .sort()
+        .toSorted()
         .map((color) => `  - ${color}`)
         .join("\n");
       errorMessage += '\n\nPlease add these colors to your theme\'s "colors" object.';
@@ -538,7 +552,7 @@ function parseThemeJson(label: string, json: unknown): ThemeJson {
     throw new Error(errorMessage);
   }
 
-  return json as ThemeJson;
+  return json;
 }
 
 function parseThemeJsonContent(label: string, content: string): ThemeJson {
@@ -546,7 +560,8 @@ function parseThemeJsonContent(label: string, content: string): ThemeJson {
   try {
     json = JSON.parse(content);
   } catch (error) {
-    throw new Error(`Failed to parse theme ${label}: ${error}`);
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to parse theme ${label}: ${message}`, { cause: error });
   }
   return parseThemeJson(label, json);
 }
@@ -644,7 +659,7 @@ export interface TerminalThemeDetectionOptions {
 function getColorFgBgBackgroundIndex(colorfgbg: string): number | undefined {
   const parts = colorfgbg.split(";");
   for (let i = parts.length - 1; i >= 0; i--) {
-    const bg = parseInt(parts[i].trim(), 10);
+    const bg = Number.parseInt(parts[i].trim(), 10);
     if (Number.isInteger(bg) && bg >= 0 && bg <= 255) {
       return bg;
     }
@@ -676,16 +691,30 @@ function parseOscHexChannel(channel: string): number | undefined {
   if (max <= 0) {
     return undefined;
   }
-  return Math.round((parseInt(channel, 16) / max) * 255);
+  return Math.round((Number.parseInt(channel, 16) / max) * 255);
 }
 
 export function parseOsc11BackgroundColor(data: string): RgbColor | undefined {
-  const match = data.match(/^\x1b\]11;([^\x07\x1b]*)(?:\x07|\x1b\\)$/i);
-  if (!match) {
+  const prefix = "\u001B]11;";
+  const belSuffix = "\u0007";
+  const escSuffix = "\u001B\\";
+  if (!data.startsWith(prefix)) {
     return undefined;
   }
 
-  const value = match[1].trim();
+  const suffixLength = data.endsWith(belSuffix)
+    ? belSuffix.length
+    : data.endsWith(escSuffix)
+      ? escSuffix.length
+      : 0;
+  if (suffixLength === 0) {
+    return undefined;
+  }
+
+  const value = data.slice(prefix.length, -suffixLength).trim();
+  if (value.includes("\u0007") || value.includes("\u001B")) {
+    return undefined;
+  }
   if (value.startsWith("#")) {
     const hex = value.slice(1);
     if (/^[0-9a-f]{6}$/i.test(hex)) {
@@ -750,7 +779,9 @@ const THEME_KEY = Symbol.for("openclaw:agent-theme");
 export const theme: Theme = new Proxy({} as Theme, {
   get(_target, prop) {
     const t = (globalThis as Record<symbol, Theme>)[THEME_KEY];
-    if (!t) throw new Error("Theme not initialized. Call initTheme() first.");
+    if (!t) {
+      throw new Error("Theme not initialized. Call initTheme() first.");
+    }
     return (t as unknown as Record<string | symbol, unknown>)[prop];
   },
 });
@@ -782,7 +813,7 @@ export function initTheme(themeName?: string, enableWatcher: boolean = false): v
     if (enableWatcher) {
       startThemeWatcher();
     }
-  } catch (_error) {
+  } catch {
     // Theme is invalid - fall back to dark theme silently
     currentThemeName = "dark";
     setGlobalTheme(loadTheme("dark"));
@@ -873,7 +904,7 @@ function startThemeWatcher(): void {
         if (onThemeChangeCallback) {
           onThemeChangeCallback();
         }
-      } catch (_error) {
+      } catch {
         // Ignore errors (file might be in invalid state while being edited)
       }
     }, 100);
@@ -1009,14 +1040,22 @@ export function getThemeExportColors(themeName?: string): {
   try {
     const themeJson = loadThemeJson(name);
     const exportSection = themeJson.export;
-    if (!exportSection) return {};
+    if (!exportSection) {
+      return {};
+    }
 
     const vars = themeJson.vars ?? {};
     const resolve = (value: ColorValue | undefined): string | undefined => {
-      if (value === undefined) return undefined;
+      if (value === undefined) {
+        return undefined;
+      }
       const resolved = resolveVarRefs(value, vars);
-      if (typeof resolved === "number") return ansi256ToHex(resolved);
-      if (resolved === "") return undefined;
+      if (typeof resolved === "number") {
+        return ansi256ToHex(resolved);
+      }
+      if (resolved === "") {
+        return undefined;
+      }
       return resolved;
     };
 
@@ -1097,7 +1136,9 @@ export function highlightCode(code: string, lang?: string): string[] {
  */
 export function getLanguageFromPath(filePath: string): string | undefined {
   const ext = filePath.split(".").pop()?.toLowerCase();
-  if (!ext) return undefined;
+  if (!ext) {
+    return undefined;
+  }
 
   const extToLang: Record<string, string> = {
     ts: "typescript",

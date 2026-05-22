@@ -4,12 +4,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { withTempDir } from "../test-helpers/temp-dir.js";
 import {
   clampPercent,
-  resolveLegacyPiAgentAccessToken,
+  resolveLegacyAgentAccessToken,
   resolveUsageProviderId,
   withTimeout,
 } from "./provider-usage.shared.js";
 
-async function withLegacyPiAuthFile(
+async function withLegacyAgentAuthFile(
   contents: string,
   run: (home: string) => Promise<void> | void,
 ): Promise<void> {
@@ -86,18 +86,18 @@ describe("provider-usage.shared", () => {
 
   it.each([
     {
-      name: "reads legacy pi auth tokens for known provider aliases",
+      name: "reads legacy agent auth tokens for known provider aliases",
       contents: `${JSON.stringify({ "z-ai": { access: "legacy-zai-key" } }, null, 2)}\n`,
       expected: "legacy-zai-key",
     },
     {
-      name: "returns undefined for invalid legacy pi auth files",
+      name: "returns undefined for invalid legacy agent auth files",
       contents: "{not-json",
       expected: undefined,
     },
   ])("$name", async ({ contents, expected }) => {
-    await withLegacyPiAuthFile(contents, async (home) => {
-      expect(resolveLegacyPiAgentAccessToken({ HOME: home }, ["z-ai", "zai"])).toBe(expected);
+    await withLegacyAgentAuthFile(contents, async (home) => {
+      expect(resolveLegacyAgentAccessToken({ HOME: home }, ["z-ai", "zai"])).toBe(expected);
     });
   });
 });

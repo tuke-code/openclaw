@@ -23,7 +23,7 @@ function argsRecordForToolCall(context: AfterToolCallContext): Record<string, un
   }
   const fallbackArgs = context.toolCall.arguments;
   return fallbackArgs && typeof fallbackArgs === "object" && !Array.isArray(fallbackArgs)
-    ? (fallbackArgs as Record<string, unknown>)
+    ? fallbackArgs
     : {};
 }
 

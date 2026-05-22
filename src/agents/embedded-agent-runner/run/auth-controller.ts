@@ -1,4 +1,4 @@
-import type { Api, Model } from "openclaw/plugin-sdk/llm";
+import type { Model } from "openclaw/plugin-sdk/llm";
 import type { ThinkLevel } from "../../../auto-reply/thinking.js";
 import { formatErrorMessage } from "../../../infra/errors.js";
 import { prepareProviderRuntimeAuth } from "../../../plugins/provider-runtime.js";
@@ -58,10 +58,10 @@ export function createEmbeddedRunAuthController(params: {
   allowTransientCooldownProbe: boolean;
   getProvider(): string;
   getModelId(): string;
-  getRuntimeModel(): Model<Api>;
-  setRuntimeModel(next: Model<Api>): void;
-  getEffectiveModel(): Model<Api>;
-  setEffectiveModel(next: Model<Api>): void;
+  getRuntimeModel(): Model;
+  setRuntimeModel(next: Model): void;
+  getEffectiveModel(): Model;
+  setEffectiveModel(next: Model): void;
   getApiKeyInfo(): ApiKeyInfo | null;
   setApiKeyInfo(next: ApiKeyInfo | null): void;
   getLastProfileId(): string | undefined;
@@ -76,7 +76,7 @@ export function createEmbeddedRunAuthController(params: {
   log: LogLike;
 }) {
   const applyPreparedRuntimeRequestOverrides = (paramsForApply: {
-    runtimeModel: Model<Api>;
+    runtimeModel: Model;
     preparedAuth: {
       baseUrl?: string;
       request?: Parameters<typeof resolveProviderRequestConfig>[0]["request"];
@@ -120,7 +120,7 @@ export function createEmbeddedRunAuthController(params: {
   const nextRuntimeAuthGeneration = () => (params.getRuntimeAuthState()?.generation ?? 0) + 1;
 
   const prepareRuntimeAuthForModel = async (prepareParams: {
-    runtimeModel: Model<Api>;
+    runtimeModel: Model;
     apiKey: string;
     authMode: string;
     profileId?: string;

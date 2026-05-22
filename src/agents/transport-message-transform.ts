@@ -1,4 +1,4 @@
-import type { Api, Context, Model } from "@earendil-works/pi-ai";
+import type { Api, Context, Model } from "openclaw/plugin-sdk/llm";
 import { repairToolUseResultPairing } from "./session-transcript-repair.js";
 
 const SYNTHETIC_TOOL_RESULT_APIS = new Set<string>([
@@ -39,10 +39,10 @@ function isFailedAssistantTurn(message: Context["messages"][number]): boolean {
 
 export function transformTransportMessages(
   messages: Context["messages"],
-  model: Model<Api>,
+  model: Model,
   normalizeToolCallId?: (
     id: string,
-    targetModel: Model<Api>,
+    targetModel: Model,
     source: { provider: string; api: Api; model: string },
   ) => string,
   options?: {

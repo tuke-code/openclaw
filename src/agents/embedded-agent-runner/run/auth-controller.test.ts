@@ -41,7 +41,7 @@ function createDeferred<T>() {
   return { promise, resolve, reject };
 }
 
-function createTestModel(): Model<Api> {
+function createTestModel(): Model {
   return {
     id: "test-model",
     name: "test-model",
@@ -56,7 +56,7 @@ function createTestModel(): Model<Api> {
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: 8_000,
     maxTokens: 4_000,
-  } as Model<Api>;
+  } as Model;
 }
 
 function getRuntimeAuthSnapshot(
@@ -66,8 +66,8 @@ function getRuntimeAuthSnapshot(
 }
 
 type MutableAuthControllerHarness = {
-  runtimeModel: Model<Api>;
-  effectiveModel: Model<Api>;
+  runtimeModel: Model;
+  effectiveModel: Model;
   apiKeyInfo: unknown;
   lastProfileId?: string;
   runtimeAuthState: RuntimeAuthState | null;

@@ -1,4 +1,4 @@
-import type { Api, Model } from "openclaw/plugin-sdk/llm";
+import type { Model } from "openclaw/plugin-sdk/llm";
 import type { AgentCompactionIdentifierPolicy } from "../../config/types.agent-defaults.js";
 import { createSessionManagerRuntimeRegistry } from "./session-manager-runtime-registry.js";
 
@@ -13,7 +13,7 @@ export type CompactionSafeguardRuntimeValue = {
    * Passed through runtime because `ctx.model` is undefined in the compact.ts workflow
    * (extensionRunner.initialize() is never called in that path).
    */
-  model?: Model<Api>;
+  model?: Model;
   recentTurnsPreserve?: number;
   qualityGuardEnabled?: boolean;
   qualityGuardMaxRetries?: number;

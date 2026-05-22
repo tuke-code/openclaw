@@ -9,22 +9,43 @@ import { ensureDirectory, logVerboseCopy, resolveBuildCopyContext } from "./lib/
 
 const context = resolveBuildCopyContext(import.meta.url);
 
-const srcDir = path.join(context.projectRoot, "src", "auto-reply", "reply", "export-html");
-const distDir = path.join(context.projectRoot, "dist", "export-html");
+const sessionTemplateSrcDir = path.join(
+  context.projectRoot,
+  "src",
+  "agents",
+  "sessions",
+  "export-html",
+);
+const sessionTemplateDistDir = path.join(
+  context.projectRoot,
+  "dist",
+  "agents",
+  "sessions",
+  "export-html",
+);
+const sharedVendorSrcDir = path.join(
+  context.projectRoot,
+  "src",
+  "auto-reply",
+  "reply",
+  "export-html",
+  "vendor",
+);
+const sharedVendorDistDir = path.join(context.projectRoot, "dist", "export-html", "vendor");
 
 function copyExportHtmlTemplates() {
-  if (!fs.existsSync(srcDir)) {
-    console.warn(`${context.prefix} Source directory not found:`, srcDir);
+  if (!fs.existsSync(sessionTemplateSrcDir)) {
+    console.warn(`${context.prefix} Source directory not found:`, sessionTemplateSrcDir);
     return;
   }
 
-  ensureDirectory(distDir);
+  ensureDirectory(sessionTemplateDistDir);
 
   const templateFiles = ["template.html", "template.css", "template.js"];
   let copiedCount = 0;
   for (const file of templateFiles) {
-    const srcFile = path.join(srcDir, file);
-    const distFile = path.join(distDir, file);
+    const srcFile = path.join(sessionTemplateSrcDir, file);
+    const distFile = path.join(sessionTemplateDistDir, file);
     if (fs.existsSync(srcFile)) {
       fs.copyFileSync(srcFile, distFile);
       copiedCount += 1;
@@ -32,14 +53,12 @@ function copyExportHtmlTemplates() {
     }
   }
 
-  const srcVendor = path.join(srcDir, "vendor");
-  const distVendor = path.join(distDir, "vendor");
-  if (fs.existsSync(srcVendor)) {
-    ensureDirectory(distVendor);
-    const vendorFiles = fs.readdirSync(srcVendor);
+  if (fs.existsSync(sharedVendorSrcDir)) {
+    ensureDirectory(sharedVendorDistDir);
+    const vendorFiles = fs.readdirSync(sharedVendorSrcDir);
     for (const file of vendorFiles) {
-      const srcFile = path.join(srcVendor, file);
-      const distFile = path.join(distVendor, file);
+      const srcFile = path.join(sharedVendorSrcDir, file);
+      const distFile = path.join(sharedVendorDistDir, file);
       if (fs.statSync(srcFile).isFile()) {
         fs.copyFileSync(srcFile, distFile);
         copiedCount += 1;

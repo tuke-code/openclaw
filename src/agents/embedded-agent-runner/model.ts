@@ -148,10 +148,7 @@ function discoverCachedAgentStoresForAgent(
   });
 }
 
-function canonicalizeLegacyResolvedModel(params: {
-  provider: string;
-  model: Model<Api>;
-}): Model<Api> {
+function canonicalizeLegacyResolvedModel(params: { provider: string; model: Model }): Model {
   if (
     normalizeProviderId(params.provider) !== "openai-codex" ||
     params.model.id.trim().toLowerCase() !== "gpt-5.4-codex"
@@ -171,8 +168,8 @@ function applyResolvedTransportFallback(params: {
   cfg?: OpenClawConfig;
   workspaceDir?: string;
   runtimeHooks: ProviderRuntimeHooks;
-  model: Model<Api>;
-}): Model<Api> | undefined {
+  model: Model;
+}): Model | undefined {
   const normalized = params.runtimeHooks.normalizeProviderTransportWithPlugin({
     provider: params.provider,
     config: params.cfg,
@@ -202,17 +199,17 @@ function applyResolvedTransportFallback(params: {
 
 function normalizeResolvedModel(params: {
   provider: string;
-  model: Model<Api>;
+  model: Model;
   cfg?: OpenClawConfig;
   agentDir?: string;
   workspaceDir?: string;
   runtimeHooks?: ProviderRuntimeHooks;
-}): Model<Api> {
-  const normalizeModelCost = (cost: unknown): Model<Api>["cost"] => {
+}): Model {
+  const normalizeModelCost = (cost: unknown): Model["cost"] => {
     if (!cost || typeof cost !== "object" || Array.isArray(cost)) {
       return { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
     }
-    const record = cost as Partial<Model<Api>["cost"]>;
+    const record = cost as Partial<Model["cost"]>;
     const input =
       typeof record.input === "number" && Number.isFinite(record.input) ? record.input : 0;
     const output =
@@ -231,7 +228,7 @@ function normalizeResolvedModel(params: {
       cacheRead === record.cacheRead &&
       cacheWrite === record.cacheWrite
     ) {
-      return record as Model<Api>["cost"];
+      return record as Model["cost"];
     }
     return {
       ...cost,
@@ -251,7 +248,7 @@ function normalizeResolvedModel(params: {
       input: params.model.input,
     }),
     cost: normalizeModelCost((params.model as { cost?: unknown }).cost),
-  } as Model<Api>;
+  } as Model;
   const runtimeHooks = params.runtimeHooks ?? DEFAULT_PROVIDER_RUNTIME_HOOKS;
   const pluginNormalized = runtimeHooks.normalizeProviderResolvedModelWithPlugin({
     provider: params.provider,
@@ -265,7 +262,7 @@ function normalizeResolvedModel(params: {
       modelId: normalizedInputModel.id,
       model: normalizedInputModel,
     },
-  }) as Model<Api> | undefined;
+  }) as Model | undefined;
   const compatNormalized = runtimeHooks.applyProviderResolvedModelCompatWithPlugins?.({
     provider: params.provider,
     config: params.cfg,
@@ -278,7 +275,7 @@ function normalizeResolvedModel(params: {
       modelId: normalizedInputModel.id,
       model: (pluginNormalized ?? normalizedInputModel) as never,
     },
-  }) as Model<Api> | undefined;
+  }) as Model | undefined;
   const transportNormalized = runtimeHooks.applyProviderResolvedTransportWithPlugin?.({
     provider: params.provider,
     config: params.cfg,
@@ -291,7 +288,7 @@ function normalizeResolvedModel(params: {
       modelId: normalizedInputModel.id,
       model: (compatNormalized ?? pluginNormalized ?? normalizedInputModel) as never,
     },
-  }) as Model<Api> | undefined;
+  }) as Model | undefined;
   const fallbackTransportNormalized =
     transportNormalized ??
     applyResolvedTransportFallback({
@@ -716,7 +713,7 @@ function resolveExplicitModelWithRegistry(params: {
   agentDir?: string;
   workspaceDir?: string;
   runtimeHooks?: ProviderRuntimeHooks;
-}): { kind: "resolved"; model: Model<Api> } | { kind: "suppressed" } | undefined {
+}): { kind: "resolved"; model: Model } | { kind: "suppressed" } | undefined {
   const { provider, modelId, modelRegistry, cfg, agentDir, workspaceDir, runtimeHooks } = params;
   const providerConfig = resolveConfiguredProviderConfig(cfg, provider);
   const requestTimeoutMs = resolveProviderRequestTimeoutMs(providerConfig?.timeoutSeconds);
@@ -752,7 +749,7 @@ function resolveExplicitModelWithRegistry(params: {
           ...inlineMatch,
           ...(resolvedParams ? { params: resolvedParams } : {}),
           ...(requestTimeoutMs !== undefined ? { requestTimeoutMs } : {}),
-        } as Model<Api>,
+        } as Model,
         runtimeHooks,
       }),
     };
@@ -767,7 +764,7 @@ function resolveExplicitModelWithRegistry(params: {
   ) {
     return { kind: "suppressed" };
   }
-  const model = modelRegistry.find(provider, modelId) as Model<Api> | null;
+  const model = modelRegistry.find(provider, modelId) as Model | null;
 
   if (model) {
     return {
@@ -816,7 +813,7 @@ function resolveExplicitModelWithRegistry(params: {
           ...fallbackInlineMatch,
           ...(resolvedParams ? { params: resolvedParams } : {}),
           ...(requestTimeoutMs !== undefined ? { requestTimeoutMs } : {}),
-        } as Model<Api>,
+        } as Model,
         runtimeHooks,
       }),
     };
@@ -833,7 +830,7 @@ function resolvePluginDynamicModelWithRegistry(params: {
   agentDir?: string;
   workspaceDir?: string;
   runtimeHooks?: ProviderRuntimeHooks;
-}): Model<Api> | undefined {
+}): Model | undefined {
   const { provider, modelId, modelRegistry, cfg, agentDir, workspaceDir } = params;
   const runtimeHooks = params.runtimeHooks ?? DEFAULT_PROVIDER_RUNTIME_HOOKS;
   const providerConfig = resolveConfiguredProviderConfig(cfg, provider);
@@ -858,7 +855,7 @@ function resolvePluginDynamicModelWithRegistry(params: {
       modelRegistry,
       providerConfig,
     },
-  }) as Model<Api> | undefined;
+  }) as Model | undefined;
   if (!pluginDynamicModel) {
     return undefined;
   }
@@ -889,7 +886,7 @@ function resolveConfiguredFallbackModel(params: {
   agentDir?: string;
   workspaceDir?: string;
   runtimeHooks?: ProviderRuntimeHooks;
-}): Model<Api> | undefined {
+}): Model | undefined {
   const { provider, modelId, cfg, agentDir, workspaceDir, runtimeHooks } = params;
   const providerConfig = resolveConfiguredProviderConfig(cfg, provider);
   const requestTimeoutMs = resolveProviderRequestTimeoutMs(providerConfig?.timeoutSeconds);
@@ -971,7 +968,7 @@ function resolveConfiguredFallbackModel(params: {
           ...(resolvedParams ? { params: resolvedParams } : {}),
           ...(requestTimeoutMs !== undefined ? { requestTimeoutMs } : {}),
           headers: requestConfig.headers,
-        } as Model<Api>,
+        } as Model,
         providerRequest,
       ),
       providerConfig?.localService,
@@ -1005,9 +1002,9 @@ function shouldCompareProviderRuntimeResolvedModel(params: {
 }
 
 function preferProviderRuntimeResolvedModel(params: {
-  explicitModel: Model<Api>;
-  runtimeResolvedModel?: Model<Api>;
-}): Model<Api> {
+  explicitModel: Model;
+  runtimeResolvedModel?: Model;
+}): Model {
   if (params.runtimeResolvedModel) {
     return params.runtimeResolvedModel;
   }
@@ -1022,7 +1019,7 @@ export function resolveModelWithRegistry(params: {
   agentDir?: string;
   workspaceDir?: string;
   runtimeHooks?: ProviderRuntimeHooks;
-}): Model<Api> | undefined {
+}): Model | undefined {
   const normalizedRef = {
     provider: params.provider,
     model: normalizeStaticProviderModelId(normalizeProviderId(params.provider), params.modelId),
@@ -1083,7 +1080,7 @@ export function resolveModel(
     workspaceDir?: string;
   },
 ): {
-  model?: Model<Api>;
+  model?: Model;
   error?: string;
   authStorage: AuthStorage;
   modelRegistry: ModelRegistry;
@@ -1148,7 +1145,7 @@ export async function resolveModelAsync(
     workspaceDir?: string;
   },
 ): Promise<{
-  model?: Model<Api>;
+  model?: Model;
   error?: string;
   authStorage: AuthStorage;
   modelRegistry: ModelRegistry;

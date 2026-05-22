@@ -1,15 +1,15 @@
-import { accessSync, constants, existsSync, readFileSync, realpathSync } from "fs";
-import { homedir } from "os";
-import { basename, dirname, join, resolve, sep, win32 } from "path";
-import { fileURLToPath } from "url";
+import { accessSync, constants, existsSync, readFileSync, realpathSync } from "node:fs";
+import { homedir } from "node:os";
+import { basename, dirname, join, resolve, sep, win32 } from "node:path";
+import { fileURLToPath } from "node:url";
 import { spawnProcessSync } from "./utils/child-process.ts";
 
 // =============================================================================
 // Package Detection
 // =============================================================================
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+const currentFile = fileURLToPath(import.meta.url);
+const currentDir = dirname(currentFile);
 
 /**
  * Detect if we're running as a Bun compiled binary.
@@ -43,7 +43,9 @@ function makeSelfUpdateCommand(
   installStep: SelfUpdateCommandStep,
   uninstallStep?: SelfUpdateCommandStep,
 ): SelfUpdateCommand {
-  if (!uninstallStep) return installStep;
+  if (!uninstallStep) {
+    return installStep;
+  }
   return {
     ...installStep,
     display: `${uninstallStep.display} && ${installStep.display}`,
@@ -64,7 +66,7 @@ export function detectInstallMethod(): InstallMethod {
     return "bun-binary";
   }
 
-  const resolvedPath = `${__dirname}\0${process.execPath || ""}`.toLowerCase().replace(/\\/g, "/");
+  const resolvedPath = `${currentDir}\0${process.execPath || ""}`.toLowerCase().replace(/\\/g, "/");
 
   if (resolvedPath.includes("/pnpm/") || resolvedPath.includes("/.pnpm/")) {
     return "pnpm";
@@ -96,9 +98,13 @@ function getInferredNpmInstall(): { root: string; prefix: string } | undefined {
   } else if (path.basename(parent) === "node_modules") {
     root = parent;
   }
-  if (!root) return undefined;
+  if (!root) {
+    return undefined;
+  }
   const rootParent = path.dirname(root);
-  if (path.basename(rootParent) === "lib") return { root, prefix: path.dirname(rootParent) };
+  if (path.basename(rootParent) === "lib") {
+    return { root, prefix: path.dirname(rootParent) };
+  }
   // Windows global npm prefixes use `<prefix>\\node_modules`, which is
   // indistinguishable from local project installs by path shape alone. Do not
   // infer unsupported Windows custom prefixes without `npm root -g` evidence.
@@ -160,6 +166,7 @@ function getSelfUpdateCommandForMethod(
     case "unknown":
       return undefined;
   }
+  return undefined;
 }
 
 function readCommandOutput(
@@ -171,7 +178,9 @@ function readCommandOutput(
     encoding: "utf-8",
     stdio: ["ignore", "pipe", "pipe"],
   });
-  if (result.status === 0) return result.stdout.trim() || undefined;
+  if (result.status === 0) {
+    return result.stdout.trim() || undefined;
+  }
   if (options.requireSuccess) {
     const reason =
       result.error?.message || result.stderr.trim() || `exit code ${result.status ?? "unknown"}`;
@@ -225,6 +234,7 @@ function getGlobalPackageRoots(
     case "unknown":
       return [];
   }
+  return [];
 }
 
 function normalizeExistingPathForComparison(
@@ -262,7 +272,9 @@ function getPathComparisonCandidates(path: string): string[] {
 
 function getEntrypointPackageDir(): string | undefined {
   const entrypoint = process.argv[1];
-  if (!entrypoint) return undefined;
+  if (!entrypoint) {
+    return undefined;
+  }
   let dir = dirname(entrypoint);
   while (dir !== dirname(dir)) {
     if (existsSync(join(dir, "package.json"))) {
@@ -356,15 +368,19 @@ export function getUpdateInstruction(packageName: string): string {
 /**
  * Get the base directory for resolving package assets (themes, package.json, README.md, CHANGELOG.md).
  * - For Bun binary: returns the directory containing the executable
- * - For Node.js (dist/): returns __dirname (the dist/ directory)
+ * - For Node.js (dist/): returns currentDir (the dist/ directory)
  * - For tsx (src/): returns parent directory (the package root)
  */
 export function getPackageDir(): string {
   // Allow override via environment variable (useful for Nix/Guix where store paths tokenize poorly)
   const envDir = process.env.OPENCLAW_PACKAGE_DIR;
   if (envDir) {
-    if (envDir === "~") return homedir();
-    if (envDir.startsWith("~/")) return homedir() + envDir.slice(1);
+    if (envDir === "~") {
+      return homedir();
+    }
+    if (envDir.startsWith("~/")) {
+      return homedir() + envDir.slice(1);
+    }
     return envDir;
   }
 
@@ -372,8 +388,8 @@ export function getPackageDir(): string {
     // Bun binary: process.execPath points to the compiled executable
     return dirname(process.execPath);
   }
-  // Node.js: walk up from __dirname until we find package.json
-  let dir = __dirname;
+  // Node.js: walk up from currentDir until we find package.json
+  let dir = currentDir;
   while (dir !== dirname(dir)) {
     if (existsSync(join(dir, "package.json"))) {
       return dir;
@@ -381,7 +397,7 @@ export function getPackageDir(): string {
     dir = dirname(dir);
   }
   // Fallback (shouldn't happen)
-  return __dirname;
+  return currentDir;
 }
 
 function getPackageSourceOrDistDir(): string {
@@ -502,8 +518,12 @@ export const ENV_AGENT_DIR = `${APP_NAME.toUpperCase()}_AGENT_DIR`;
 export const ENV_SESSION_DIR = `${APP_NAME.toUpperCase()}_AGENT_SESSION_DIR`;
 
 export function expandTildePath(path: string): string {
-  if (path === "~") return homedir();
-  if (path.startsWith("~/")) return homedir() + path.slice(1);
+  if (path === "~") {
+    return homedir();
+  }
+  if (path.startsWith("~/")) {
+    return homedir() + path.slice(1);
+  }
   return path;
 }
 

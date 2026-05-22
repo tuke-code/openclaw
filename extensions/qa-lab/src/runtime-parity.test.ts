@@ -151,7 +151,7 @@ describe("runtime parity", () => {
     });
 
     expect(result.drift).toBe("none");
-    expect(events).toEqual(["start:pi", "finish:pi", "start:codex", "finish:codex"]);
+    expect(events).toEqual(["start:openclaw", "finish:openclaw", "start:codex", "finish:codex"]);
   });
 
   it("classifies final-text-only differences as text-only", async () => {
@@ -160,7 +160,7 @@ describe("runtime parity", () => {
       runCell: async (runtime) => ({
         scenarioStatus: "pass",
         cell: makeCell(runtime, {
-          finalText: runtime === "pi" ? "hello from pi" : "hello from codex",
+          finalText: runtime === "openclaw" ? "hello from openclaw" : "hello from codex",
         }),
       }),
     });
@@ -174,7 +174,7 @@ describe("runtime parity", () => {
       runCell: async (runtime) => ({
         scenarioStatus: "pass",
         cell: makeCell(runtime, {
-          toolCalls: [makeToolCall(runtime === "pi" ? {} : { argsHash: "args-b" })],
+          toolCalls: [makeToolCall(runtime === "openclaw" ? {} : { argsHash: "args-b" })],
         }),
       }),
     });
@@ -189,7 +189,7 @@ describe("runtime parity", () => {
       runCell: async (runtime) => ({
         scenarioStatus: "pass",
         cell: makeCell(runtime, {
-          toolCalls: [makeToolCall(runtime === "pi" ? {} : { resultHash: "result-b" })],
+          toolCalls: [makeToolCall(runtime === "openclaw" ? {} : { resultHash: "result-b" })],
         }),
       }),
     });
@@ -204,7 +204,9 @@ describe("runtime parity", () => {
         scenarioStatus: "pass",
         cell: makeCell(runtime, {
           transcriptBytes:
-            runtime === "pi" ? '{"role":"assistant"}\n' : '{"role":"assistant"}\n{"role":"tool"}\n',
+            runtime === "openclaw"
+              ? '{"role":"assistant"}\n'
+              : '{"role":"assistant"}\n{"role":"tool"}\n',
         }),
       }),
     });
@@ -216,8 +218,8 @@ describe("runtime parity", () => {
     const result = await runRuntimeParityScenario({
       scenarioId: "failure-mode",
       runCell: async (runtime) => ({
-        scenarioStatus: runtime === "pi" ? "fail" : "pass",
-        cell: makeCell(runtime, runtime === "pi" ? { runtimeErrorClass: "timeout" } : {}),
+        scenarioStatus: runtime === "openclaw" ? "fail" : "pass",
+        cell: makeCell(runtime, runtime === "openclaw" ? { runtimeErrorClass: "timeout" } : {}),
       }),
     });
 
@@ -229,9 +231,9 @@ describe("runtime parity", () => {
     const result = await runRuntimeParityScenario({
       scenarioId: "tool-call-failure",
       runCell: async (runtime) => ({
-        scenarioStatus: runtime === "pi" ? "pass" : "fail",
+        scenarioStatus: runtime === "openclaw" ? "pass" : "fail",
         cell: makeCell(runtime, {
-          toolCalls: runtime === "pi" ? [makeToolCall()] : [],
+          toolCalls: runtime === "openclaw" ? [makeToolCall()] : [],
           ...(runtime === "codex" ? { runtimeErrorClass: "tool-error" } : {}),
         }),
       }),
@@ -245,9 +247,9 @@ describe("runtime parity", () => {
     const result = await runRuntimeParityScenario({
       scenarioId: "tool-result-timeout",
       runCell: async (runtime) => ({
-        scenarioStatus: runtime === "pi" ? "pass" : "fail",
+        scenarioStatus: runtime === "openclaw" ? "pass" : "fail",
         cell: makeCell(runtime, {
-          toolCalls: [makeToolCall(runtime === "pi" ? {} : { resultHash: "result-b" })],
+          toolCalls: [makeToolCall(runtime === "openclaw" ? {} : { resultHash: "result-b" })],
           ...(runtime === "codex" ? { runtimeErrorClass: "timeout" } : {}),
         }),
       }),
@@ -333,7 +335,7 @@ describe("runtime parity", () => {
     );
 
     const cell = await captureRuntimeParityCell({
-      runtime: "pi",
+      runtime: "openclaw",
       gateway: {
         tempRoot,
       },
@@ -451,7 +453,7 @@ describe("runtime parity", () => {
     ]);
 
     const cell = await captureRuntimeParityCell({
-      runtime: "pi",
+      runtime: "openclaw",
       gateway: {
         tempRoot,
       },
@@ -499,7 +501,7 @@ describe("runtime parity", () => {
     ]);
 
     const cell = await captureRuntimeParityCell({
-      runtime: "pi",
+      runtime: "openclaw",
       gateway: {
         tempRoot,
       },
@@ -723,7 +725,7 @@ describe("runtime parity", () => {
     );
 
     const cell = await captureRuntimeParityCell({
-      runtime: "pi",
+      runtime: "openclaw",
       gateway: {
         tempRoot,
       },

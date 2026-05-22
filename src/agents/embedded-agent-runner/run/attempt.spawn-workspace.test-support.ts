@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import type { Api, Model } from "openclaw/plugin-sdk/llm";
+import type { Model } from "openclaw/plugin-sdk/llm";
 import { expect, vi, type Mock } from "vitest";
 import type {
   AssembleResult,
@@ -1077,7 +1077,7 @@ export const testModel = {
   compat: {},
   contextWindow: 8192,
   input: ["text"],
-} as unknown as Model<Api>;
+} as unknown as Model;
 
 const testAuthStorage = {
   getApiKey: async () => undefined,

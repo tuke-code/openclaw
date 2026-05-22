@@ -26,7 +26,7 @@ function createAttemptParams(workspaceDir: string) {
       id: "gpt-5.4",
       input: ["text"],
       contextWindow: 128_000,
-    } as Model<Api>,
+    } as Model,
     authStorage: {} as AuthStorage,
     modelRegistry: {} as ModelRegistry,
     thinkLevel: "off" as const,

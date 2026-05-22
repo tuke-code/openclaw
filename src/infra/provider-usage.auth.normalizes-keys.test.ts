@@ -375,7 +375,7 @@ describe("resolveProviderAuths key normalization", () => {
     );
   }
 
-  async function writeLegacyPiAuth(home: string, raw: string) {
+  async function writeLegacyAgentAuth(home: string, raw: string) {
     const legacyDir = path.join(home, ".pi", "agent");
     await fs.mkdir(legacyDir, { recursive: true });
     await fs.writeFile(path.join(legacyDir, "auth.json"), raw, "utf8");
@@ -527,7 +527,7 @@ describe("resolveProviderAuths key normalization", () => {
     await expectResolvedAuthsFromSuiteHome({
       providers: ["zai"],
       setup: async (home) => {
-        await writeLegacyPiAuth(
+        await writeLegacyAgentAuth(
           home,
           `${JSON.stringify({ "z-ai": { access: "legacy-zai-key" } }, null, 2)}\n`,
         );
@@ -625,7 +625,7 @@ describe("resolveProviderAuths key normalization", () => {
     await expectResolvedAuthsFromSuiteHome({
       providers: ["zai"],
       setup: async (home) => {
-        await writeLegacyPiAuth(home, "{not-json");
+        await writeLegacyAgentAuth(home, "{not-json");
       },
       expected: [],
     });

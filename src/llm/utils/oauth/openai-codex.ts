@@ -37,6 +37,11 @@ const JWT_CLAIM_PATH = "https://api.openai.com/auth";
 type TokenSuccess = { type: "success"; access: string; refresh: string; expires: number };
 type TokenFailure = { type: "failed"; message: string; status?: number };
 type TokenResult = TokenSuccess | TokenFailure;
+type TokenResponseJson = {
+  access_token?: string;
+  refresh_token?: string;
+  expires_in?: number;
+};
 
 type JwtPayload = {
   [JWT_CLAIM_PATH]?: {
@@ -98,6 +103,20 @@ function decodeJwt(token: string): JwtPayload | null {
   }
 }
 
+function formatMissingTokenResponseFields(json: TokenResponseJson): string {
+  const missing: string[] = [];
+  if (!json.access_token) {
+    missing.push("access_token");
+  }
+  if (!json.refresh_token) {
+    missing.push("refresh_token");
+  }
+  if (typeof json.expires_in !== "number") {
+    missing.push("expires_in");
+  }
+  return missing.join(", ");
+}
+
 async function exchangeAuthorizationCode(
   code: string,
   verifier: string,
@@ -124,16 +143,12 @@ async function exchangeAuthorizationCode(
     };
   }
 
-  const json = (await response.json()) as {
-    access_token?: string;
-    refresh_token?: string;
-    expires_in?: number;
-  };
+  const json = (await response.json()) as TokenResponseJson;
 
   if (!json.access_token || !json.refresh_token || typeof json.expires_in !== "number") {
     return {
       type: "failed",
-      message: `OpenAI Codex token exchange response missing fields: ${JSON.stringify(json)}`,
+      message: `OpenAI Codex token exchange response missing fields: ${formatMissingTokenResponseFields(json)}`,
     };
   }
 
@@ -166,16 +181,12 @@ async function refreshAccessToken(refreshToken: string): Promise<TokenResult> {
       };
     }
 
-    const json = (await response.json()) as {
-      access_token?: string;
-      refresh_token?: string;
-      expires_in?: number;
-    };
+    const json = (await response.json()) as TokenResponseJson;
 
     if (!json.access_token || !json.refresh_token || typeof json.expires_in !== "number") {
       return {
         type: "failed",
-        message: `OpenAI Codex token refresh response missing fields: ${JSON.stringify(json)}`,
+        message: `OpenAI Codex token refresh response missing fields: ${formatMissingTokenResponseFields(json)}`,
       };
     }
 
@@ -466,4 +477,9 @@ export const openaiCodexOAuthProvider: OAuthProviderInterface = {
   getApiKey(credentials: OAuthCredentials): string {
     return credentials.access;
   },
+};
+
+export const testing = {
+  exchangeAuthorizationCode,
+  refreshAccessToken,
 };

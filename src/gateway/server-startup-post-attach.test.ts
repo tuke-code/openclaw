@@ -48,7 +48,7 @@ const hoisted = vi.hoisted(() => {
     allowed: true,
     inCatalog: true,
   }));
-  const resolveEmbeddedAgentRuntime = vi.fn(() => "pi");
+  const resolveEmbeddedAgentRuntime = vi.fn(() => "openclaw");
   const ensureOpenClawModelsJson = vi.fn(async () => {});
   const clearCurrentProviderAuthState = vi.fn();
   const warmCurrentProviderAuthState = vi.fn(async (_cfg?: unknown, _options?: unknown) => {});
@@ -192,7 +192,7 @@ vi.mock("../agents/model-selection.js", () => ({
   resolveHooksGmailModel: hoisted.resolveHooksGmailModel,
 }));
 
-vi.mock("../agents/pi-embedded-runner/runtime.js", () => ({
+vi.mock("../agents/embedded-agent-runner/runtime.js", () => ({
   resolveEmbeddedAgentRuntime: hoisted.resolveEmbeddedAgentRuntime,
 }));
 
@@ -342,7 +342,7 @@ describe("startGatewayPostAttachRuntime", () => {
       inCatalog: true,
     });
     hoisted.resolveEmbeddedAgentRuntime.mockReset();
-    hoisted.resolveEmbeddedAgentRuntime.mockReturnValue("pi");
+    hoisted.resolveEmbeddedAgentRuntime.mockReturnValue("openclaw");
     hoisted.ensureOpenClawModelsJson.mockReset();
     hoisted.ensureOpenClawModelsJson.mockResolvedValue(undefined);
     hoisted.clearCurrentProviderAuthState.mockClear();

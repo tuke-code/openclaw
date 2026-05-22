@@ -8,6 +8,34 @@ import {
 } from "./registry.js";
 
 const datePattern = /^\d{4}-\d{2}-\d{2}$/u;
+const sdkCompatPiAliasRe = /\b(?:runEmbeddedPiAgent|EmbeddedPi\w*)\b/u;
+const sdkCompatPiAliasAllowedFiles = new Set([
+  "src/extensionAPI.ts",
+  "src/plugin-sdk/agent-harness-runtime.ts",
+  "src/plugin-sdk/test-helpers/plugin-runtime-mock.ts",
+  "src/plugins/compat/registry.ts",
+  "src/plugins/compat/registry.test.ts",
+  "src/plugins/runtime/index.test.ts",
+  "src/plugins/runtime/runtime-agent.ts",
+  "src/plugins/runtime/types-core.ts",
+]);
+
+function listTsFiles(root: string): string[] {
+  const results: string[] = [];
+  for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+    const childPath = `${root}/${entry.name}`;
+    if (entry.isDirectory()) {
+      if (entry.name !== "node_modules") {
+        results.push(...listTsFiles(childPath));
+      }
+      continue;
+    }
+    if (/\.(?:ts|tsx)$/u.test(entry.name)) {
+      results.push(childPath);
+    }
+  }
+  return results;
+}
 
 const knownDeprecatedSurfaceMarkers = [
   {
@@ -44,6 +72,11 @@ const knownDeprecatedSurfaceMarkers = [
     code: "agent-tool-result-harness-alias",
     file: "src/plugins/agent-tool-result-middleware-types.ts",
     marker: "AgentToolResultMiddlewareHarness",
+  },
+  {
+    code: "embedded-pi-agent-sdk-aliases",
+    file: "src/plugins/runtime/types-core.ts",
+    marker: "runEmbeddedPiAgent",
   },
   {
     code: "runtime-config-load-write",
@@ -214,5 +247,12 @@ describe("plugin compatibility registry", () => {
       expect(isPluginCompatCode(surface.code), surface.code).toBe(true);
       expect(fs.readFileSync(surface.file, "utf8"), surface.file).toContain(surface.marker);
     }
+  });
+
+  it("keeps embedded Pi SDK aliases quarantined to public compat surfaces", () => {
+    const hits = listTsFiles("src").filter((file) =>
+      sdkCompatPiAliasRe.test(fs.readFileSync(file, "utf8")),
+    );
+    expect(hits.filter((file) => !sdkCompatPiAliasAllowedFiles.has(file))).toEqual([]);
   });
 });

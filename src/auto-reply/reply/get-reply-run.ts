@@ -6,12 +6,12 @@ import {
 } from "../../agents/agent-scope.js";
 import { resolveSessionAuthProfileOverride } from "../../agents/auth-profiles/session-override.js";
 import type { ExecToolDefaults } from "../../agents/bash-tools.js";
+import { resolveEmbeddedFullAccessState } from "../../agents/embedded-agent-runner/sandbox-info.js";
+import type { EmbeddedFullAccessBlockedReason } from "../../agents/embedded-agent-runner/types.js";
 import { resolveFastModeState } from "../../agents/fast-mode.js";
 import { resolveAgentHarnessPolicy } from "../../agents/harness/selection.js";
 import { normalizeProviderId } from "../../agents/model-selection.js";
 import { listOpenAIAuthProfileProvidersForAgentRuntime } from "../../agents/openai-codex-routing.js";
-import { resolveEmbeddedFullAccessState } from "../../agents/pi-embedded-runner/sandbox-info.js";
-import type { EmbeddedFullAccessBlockedReason } from "../../agents/pi-embedded-runner/types.js";
 import { resolveIngressWorkspaceOverrideForSpawnedRun } from "../../agents/spawned-context.js";
 import type { SilentReplyPromptMode } from "../../agents/system-prompt.types.js";
 import { normalizeChatType } from "../../channels/chat-type.js";
@@ -267,8 +267,8 @@ export function buildExecOverridePromptHint(params: {
     .join("\n");
 }
 
-const piEmbeddedRuntimeLoader = createLazyImportLoader(
-  () => import("../../agents/pi-embedded.runtime.js"),
+const embeddedAgentRuntimeLoader = createLazyImportLoader(
+  () => import("../../agents/embedded-agent.runtime.js"),
 );
 const agentRunnerRuntimeLoader = createLazyImportLoader(() => import("./agent-runner.runtime.js"));
 const sessionUpdatesRuntimeLoader = createLazyImportLoader(
@@ -278,8 +278,8 @@ const sessionStoreRuntimeLoader = createLazyImportLoader(
   () => import("../../config/sessions/store.runtime.js"),
 );
 
-function loadPiEmbeddedRuntime() {
-  return piEmbeddedRuntimeLoader.load();
+function loadEmbeddedAgentRuntime() {
+  return embeddedAgentRuntimeLoader.load();
 }
 
 function loadAgentRunnerRuntime() {
@@ -879,15 +879,16 @@ export async function runPreparedReply(
         inlineMode: perMessageQueueMode,
         inlineOptions: perMessageQueueOptions,
       });
-  const piRuntime = useFastReplyRuntime
+  const embeddedAgentRuntime = useFastReplyRuntime
     ? null
-    : await traceRunPhase("reply.load_pi_runtime", () => loadPiEmbeddedRuntime());
-  const sessionLaneKey = piRuntime
-    ? piRuntime.resolveEmbeddedSessionLane(sessionKey ?? sessionIdFinal)
+    : await traceRunPhase("reply.load_embedded_agent_runtime", () => loadEmbeddedAgentRuntime());
+  const sessionLaneKey = embeddedAgentRuntime
+    ? embeddedAgentRuntime.resolveEmbeddedSessionLane(sessionKey ?? sessionIdFinal)
     : undefined;
   const laneSize = sessionLaneKey ? getQueueSize(sessionLaneKey) : 0;
   const activeRunQueueMode = effectiveResetTriggered ? "interrupt" : resolvedQueue.mode;
-  const rawActiveSessionIdForInterrupt = piRuntime?.resolveActiveEmbeddedRunSessionId(sessionKey);
+  const rawActiveSessionIdForInterrupt =
+    embeddedAgentRuntime?.resolveActiveEmbeddedRunSessionId(sessionKey);
   const activeSessionIdForInterrupt = isOwnPreDispatchOperationSession(
     rawActiveSessionIdForInterrupt,
   )
@@ -900,7 +901,7 @@ export async function runPreparedReply(
     (laneSize > 0 || activeSessionIdForInterrupt)
   ) {
     const cleared = clearCommandLane(sessionLaneKey);
-    const aborted = piRuntime?.abortEmbeddedPiRun(
+    const aborted = embeddedAgentRuntime?.abortEmbeddedAgentRun(
       activeSessionIdForInterrupt ?? preparedSessionState.sessionId,
     );
     logVerbose(`Interrupting ${sessionLaneKey} (cleared ${cleared}, aborted=${aborted})`);
@@ -999,10 +1000,11 @@ export async function runPreparedReply(
   const queueKey = sessionKey ?? sessionIdFinal;
   preparedSessionState = resolvePreparedSessionState();
   const resolveActiveQueueSessionId = () =>
-    piRuntime?.resolveActiveEmbeddedRunSessionId(sessionKey) ?? preparedSessionState.sessionId;
+    embeddedAgentRuntime?.resolveActiveEmbeddedRunSessionId(sessionKey) ??
+    preparedSessionState.sessionId;
   const resolveQueueBusyState = () => {
     const activeSessionId = resolveActiveQueueSessionId();
-    if (!activeSessionId || !piRuntime) {
+    if (!activeSessionId || !embeddedAgentRuntime) {
       return { activeSessionId: undefined, isActive: false, isStreaming: false };
     }
     if (isOwnPreDispatchOperationSession(activeSessionId)) {
@@ -1010,8 +1012,8 @@ export async function runPreparedReply(
     }
     return {
       activeSessionId,
-      isActive: piRuntime.isEmbeddedPiRunActive(activeSessionId),
-      isStreaming: piRuntime.isEmbeddedPiRunStreaming(activeSessionId),
+      isActive: embeddedAgentRuntime.isEmbeddedAgentRunActive(activeSessionId),
+      isStreaming: embeddedAgentRuntime.isEmbeddedAgentRunStreaming(activeSessionId),
     };
   };
   let { activeSessionId, isActive, isStreaming } = resolveQueueBusyState();
@@ -1039,9 +1041,10 @@ export async function runPreparedReply(
       sessionKey,
       sessionId: sessionIdFinal,
       abortActiveRun: (activeRunSessionId) =>
-        piRuntime?.abortEmbeddedPiRun(activeRunSessionId) ?? false,
+        embeddedAgentRuntime?.abortEmbeddedAgentRun(activeRunSessionId) ?? false,
       waitForActiveRunEnd: (activeRunSessionId) =>
-        piRuntime?.waitForEmbeddedPiRunEnd(activeRunSessionId) ?? Promise.resolve(undefined),
+        embeddedAgentRuntime?.waitForEmbeddedAgentRunEnd(activeRunSessionId) ??
+        Promise.resolve(undefined),
       refreshPreparedState: async () => {
         preparedSessionState = resolvePreparedSessionState();
         ({ authProfileId, authProfileIdSource } = await resolveRuntimeAuthProfile());
@@ -1208,8 +1211,9 @@ export async function runPreparedReply(
     isRunActive: () => {
       const latestSessionState = resolvePreparedSessionState();
       const latestActiveSessionId =
-        piRuntime?.resolveActiveEmbeddedRunSessionId(sessionKey) ?? latestSessionState.sessionId;
-      return piRuntime?.isEmbeddedPiRunActive(latestActiveSessionId) ?? false;
+        embeddedAgentRuntime?.resolveActiveEmbeddedRunSessionId(sessionKey) ??
+        latestSessionState.sessionId;
+      return embeddedAgentRuntime?.isEmbeddedAgentRunActive(latestActiveSessionId) ?? false;
     },
     isStreaming,
     opts,
