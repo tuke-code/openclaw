@@ -49,7 +49,9 @@ async function makeTestState(seed = "legacy-oauth-seed"): Promise<OpenClawTestSt
 
 function readStoredAuthProfiles(state: OpenClawTestState, agentId = "main") {
   const store = loadPersistedAuthProfileStore(state.agentDir(agentId), { env: state.env });
-  expect(store).not.toBeNull();
+  if (!store) {
+    throw new Error("expected persisted auth profile store");
+  }
   return store;
 }
 
@@ -58,7 +60,9 @@ function readRawAuthProfiles(state: OpenClawTestState, agentId = "main") {
     resolveAuthProfileStoreKey(state.agentDir(agentId), state.env),
     { env: state.env },
   );
-  expect(entry.exists).toBe(true);
+  if (!entry.exists) {
+    throw new Error("expected raw auth profile payload");
+  }
   return entry.value;
 }
 

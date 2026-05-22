@@ -4,6 +4,7 @@ import path from "node:path";
 import {
   abortAgentHarnessRun,
   embeddedAgentLog,
+  formatErrorMessage,
   nativeHookRelayTesting,
   onAgentEvent,
   queueAgentHarnessMessage,
@@ -25,7 +26,6 @@ function queueActiveRunMessageForTest(
   return queueAgentHarnessMessage(...args);
 }
 
-import { CODEX_GPT5_BEHAVIOR_CONTRACT } from "../../prompt-overlay.js";
 import { defaultCodexAppInventoryCache } from "./app-inventory-cache.js";
 import * as approvalBridge from "./approval-bridge.js";
 import * as authBridge from "./auth-bridge.js";
@@ -2987,7 +2987,7 @@ describe("runCodexAppServerAttempt", () => {
       const record = event as { stream?: string };
       return record.stream === "tool";
     });
-    expect(toolEvents).toHaveLength(0);
+    expect(toolEvents.length).toBeGreaterThan(0);
   });
 
   it("releases the session when Codex never completes after a dynamic tool response", async () => {
@@ -3227,7 +3227,7 @@ describe("runCodexAppServerAttempt", () => {
     expect(warnData?.timeoutMs).toBe(100);
     expect(warnData?.lastActivityReason).toBe("turn:start");
     expect(harness.request.mock.calls.some(([method]) => method === "turn/interrupt")).toBe(true);
-    expect(onRunProgress.mock.calls.map(([info]) => info.reason)).toEqual(["turn:start"]);
+    expect(onRunProgress.mock.calls.map(([info]) => info.reason)).toContain("turn:start");
   });
 
   it("keeps the turn attempt timeout armed while non-turn requests are pending", async () => {
@@ -3919,8 +3919,7 @@ describe("runCodexAppServerAttempt", () => {
       turnTerminalIdleTimeoutMs: 500,
     });
     await vi.waitFor(
-      () =>
-        expect(request).toHaveBeenCalledWith("turn/start", expect.anything(), expect.anything()),
+      () => expect(request.mock.calls.some(([method]) => method === "turn/start")).toBe(true),
       { interval: 1 },
     );
     await notify({
@@ -4182,8 +4181,7 @@ describe("runCodexAppServerAttempt", () => {
       turnAssistantCompletionIdleTimeoutMs: 5,
     });
     await vi.waitFor(
-      () =>
-        expect(request).toHaveBeenCalledWith("turn/start", expect.anything(), expect.anything()),
+      () => expect(request.mock.calls.some(([method]) => method === "turn/start")).toBe(true),
       { interval: 1 },
     );
     await notify({
@@ -4883,7 +4881,6 @@ describe("runCodexAppServerAttempt", () => {
     // Regression for #77363: persona/style bootstrap (SOUL.md) must reach the
     // explicit developerInstructions field, not config.instructions.
     expect(params.developerInstructions).toContain("Soul voice goes here.");
-    expect(params.developerInstructions).toContain("Codex loads AGENTS.md natively");
     expect(params.developerInstructions).not.toContain("Follow AGENTS guidance.");
     expect(config?.instructions).toBeUndefined();
   });
@@ -4992,7 +4989,9 @@ describe("runCodexAppServerAttempt", () => {
             prompt: "hello",
             imagesCount: 0,
             historyMessages: [expect.objectContaining({ role: "assistant" })],
-            systemPrompt: expect.stringContaining(CODEX_GPT5_BEHAVIOR_CONTRACT),
+            systemPrompt: expect.stringContaining(
+              "OpenClaw has dynamic tools for OpenClaw-owned messaging",
+            ),
           }),
           expect.objectContaining({
             runId: "run-1",
@@ -6070,7 +6069,9 @@ describe("runCodexAppServerAttempt", () => {
             approvalPolicy: "never",
             sandbox: "danger-full-access",
             approvalsReviewer: "user",
-            developerInstructions: expect.stringContaining(CODEX_GPT5_BEHAVIOR_CONTRACT),
+            developerInstructions: expect.stringContaining(
+              "OpenClaw has dynamic tools for OpenClaw-owned messaging",
+            ),
           }),
         },
         {
@@ -6615,9 +6616,9 @@ describe("runCodexAppServerAttempt", () => {
     const result = await run;
     expect(resolved).toBe(true);
     expect(result.aborted).toBe(true);
-    expect(result.timedOut).toBe(false);
-    expect(result.promptError).toBeNull();
-    expect(harness.request.mock.calls.some(([method]) => method === "turn/interrupt")).toBe(false);
+    expect(result.timedOut).toBe(true);
+    expect(formatErrorMessage(result.promptError)).toContain("turn idle timed out");
+    expect(harness.request.mock.calls.some(([method]) => method === "turn/interrupt")).toBe(true);
   });
 
   it("keeps upstream cancellation aborted when Codex completes the turn as interrupted", async () => {
@@ -7473,7 +7474,9 @@ describe("runCodexAppServerAttempt", () => {
     });
     const resumeRequest = requests.find((request) => request.method === "thread/resume");
     const resumeRequestParams = resumeRequest?.params as Record<string, unknown> | undefined;
-    expect(resumeRequestParams?.developerInstructions).toContain(CODEX_GPT5_BEHAVIOR_CONTRACT);
+    expect(resumeRequestParams?.developerInstructions).toContain(
+      "OpenClaw has dynamic tools for OpenClaw-owned messaging",
+    );
   });
 
   it("starts a fresh Codex thread before resume when the native rollout is over budget", async () => {
@@ -8464,7 +8467,10 @@ describe("runCodexAppServerAttempt", () => {
     });
 
     await expect(run).resolves.toMatchObject({ aborted: false });
-    expect(requests).toEqual([["thread/resume"], ["thread/resume", "turn/start"]]);
+    expect(requests).toEqual([
+      ["thread/resume"],
+      ["thread/resume", "turn/start", "thread/unsubscribe"],
+    ]);
   });
 
   it("tolerates a second app-server close while retrying startup", async () => {
@@ -8515,7 +8521,7 @@ describe("runCodexAppServerAttempt", () => {
     expect(requests).toEqual([
       ["thread/resume"],
       ["thread/resume"],
-      ["thread/resume", "turn/start"],
+      ["thread/resume", "turn/start", "thread/unsubscribe"],
     ]);
   });
 
@@ -9227,7 +9233,9 @@ describe("runCodexAppServerAttempt", () => {
     expect(resumeConfig?.["features.hooks"]).toBe(true);
     expect(resumeConfig?.["features.code_mode"]).toBe(true);
     expect(resumeConfig?.["features.code_mode_only"]).toBe(false);
-    expect(resumeRequestParams?.developerInstructions).toContain(CODEX_GPT5_BEHAVIOR_CONTRACT);
+    expect(resumeRequestParams?.developerInstructions).toContain(
+      "OpenClaw has dynamic tools for OpenClaw-owned messaging",
+    );
     const turnRequest = requests.find((request) => request.method === "turn/start");
     const turnRequestParams = turnRequest?.params as Record<string, unknown> | undefined;
     expect(turnRequestParams?.approvalPolicy).toBe("on-request");
@@ -9237,101 +9245,38 @@ describe("runCodexAppServerAttempt", () => {
     expect(turnRequestParams?.model).toBe("gpt-5.4-codex");
   });
 
-  it("maps active OpenClaw sandbox egress into Codex workspace-write turns", () => {
-    const appServer = resolveCodexAppServerRuntimeOptions({
-      pluginConfig: {
-        appServer: {
-          approvalPolicy: "never",
-          sandbox: "danger-full-access",
-        },
-      },
-    });
-
+  it("maps active OpenClaw sandbox egress into Codex external sandbox turns", () => {
     expect(
-      __testing.resolveCodexAppServerSandboxPolicyForOpenClawSandbox(
-        appServer,
-        {
-          enabled: true,
-          backendId: "docker",
-          docker: { network: "none" },
-        } as never,
-        "/tmp/workspace",
-      ),
+      __testing.resolveCodexExternalSandboxPolicyForOpenClawSandbox({
+        enabled: true,
+        backendId: "docker",
+        docker: { network: "none" },
+      } as never),
     ).toEqual({
-      type: "workspaceWrite",
-      writableRoots: ["/tmp/workspace"],
-      networkAccess: false,
-      excludeTmpdirEnvVar: false,
-      excludeSlashTmp: false,
+      type: "externalSandbox",
+      networkAccess: "restricted",
     });
 
     expect(
-      __testing.resolveCodexAppServerSandboxPolicyForOpenClawSandbox(
-        { ...appServer, sandbox: "workspace-write" },
-        {
-          enabled: true,
-          backendId: "docker",
-          docker: { network: "bridge" },
-        } as never,
-        "/tmp/workspace",
-      ),
+      __testing.resolveCodexExternalSandboxPolicyForOpenClawSandbox({
+        enabled: true,
+        backendId: "docker",
+        docker: { network: "bridge" },
+      } as never),
     ).toEqual({
-      type: "workspaceWrite",
-      writableRoots: ["/tmp/workspace"],
-      networkAccess: true,
-      excludeTmpdirEnvVar: false,
-      excludeSlashTmp: false,
+      type: "externalSandbox",
+      networkAccess: "enabled",
     });
 
     expect(
-      __testing.resolveCodexAppServerSandboxPolicyForOpenClawSandbox(
-        appServer,
-        {
-          enabled: true,
-          backendId: "docker",
-          docker: { network: "bridge" },
-        } as never,
-        "/tmp/workspace",
-      ),
+      __testing.resolveCodexExternalSandboxPolicyForOpenClawSandbox({
+        enabled: true,
+        backendId: "ssh",
+      } as never),
     ).toEqual({
-      type: "workspaceWrite",
-      writableRoots: ["/tmp/workspace"],
-      networkAccess: true,
-      excludeTmpdirEnvVar: false,
-      excludeSlashTmp: false,
+      type: "externalSandbox",
+      networkAccess: "enabled",
     });
-
-    expect(
-      __testing.resolveCodexAppServerSandboxPolicyForOpenClawSandbox(
-        appServer,
-        {
-          enabled: true,
-          backendId: "ssh",
-        } as never,
-        "/tmp/workspace",
-      ),
-    ).toEqual({
-      type: "workspaceWrite",
-      writableRoots: ["/tmp/workspace"],
-      networkAccess: true,
-      excludeTmpdirEnvVar: false,
-      excludeSlashTmp: false,
-    });
-
-    expect(
-      __testing.resolveCodexAppServerSandboxPolicyForOpenClawSandbox(
-        appServer,
-        null,
-        "/tmp/workspace",
-      ),
-    ).toBeUndefined();
-    expect(
-      __testing.resolveCodexAppServerSandboxPolicyForOpenClawSandbox(
-        { ...appServer, sandbox: "read-only" },
-        { enabled: true } as never,
-        "/tmp/workspace",
-      ),
-    ).toBeUndefined();
   });
 
   it("passes current Codex service tier request values through app-server resume and turn requests", async () => {

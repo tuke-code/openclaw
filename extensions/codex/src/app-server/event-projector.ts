@@ -23,7 +23,6 @@ import {
 import { emitTrustedDiagnosticEvent } from "openclaw/plugin-sdk/diagnostic-runtime";
 import type { AssistantMessage, Usage } from "openclaw/plugin-sdk/provider-ai";
 import { resolveCodexLocalRuntimeAttribution } from "./local-runtime-attribution.js";
-import { CodexNativeSubagentTaskMirror } from "./native-subagent-task-mirror.js";
 import {
   readCodexNotificationThreadId,
   readCodexNotificationTurnId,

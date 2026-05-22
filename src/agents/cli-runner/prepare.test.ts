@@ -7,6 +7,12 @@ import {
   replaceSqliteSessionTranscriptEvents,
 } from "../../config/sessions/transcript-store.sqlite.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
+import { registerLegacyContextEngine } from "../../context-engine/legacy.registration.js";
+import {
+  registerContextEngine,
+  registerContextEngineForOwner,
+} from "../../context-engine/registry.js";
+import type { ContextEngine } from "../../context-engine/types.js";
 import { getGlobalHookRunner } from "../../plugins/hook-runner-global.js";
 import { clearMemoryPluginState, registerMemoryPromptSection } from "../../plugins/memory-state.js";
 import { testing as cliBackendsTesting } from "../cli-backends.js";
@@ -20,6 +26,12 @@ import {
   setCliRunnerPrepareTestDeps,
   shouldSkipLocalCliCredentialEpoch,
 } from "./prepare.js";
+
+const getRuntimeConfigMock = vi.hoisted(() => vi.fn(() => ({})));
+
+vi.mock("../../config/config.js", () => ({
+  getRuntimeConfig: getRuntimeConfigMock,
+}));
 
 vi.mock("../../plugins/hook-runner-global.js", () => ({
   getGlobalHookRunner: vi.fn(() => null),
@@ -199,6 +211,7 @@ describe("shouldSkipLocalCliCredentialEpoch", () => {
       resolveOpenClawReferencePaths: vi.fn(async () => ({ docsPath: null, sourcePath: null })),
     });
     mockGetGlobalHookRunner.mockReturnValue(null);
+    getRuntimeConfigMock.mockReturnValue({});
     mockBuildActiveImageGenerationTaskPromptContextForSession.mockReturnValue(undefined);
     mockBuildActiveVideoGenerationTaskPromptContextForSession.mockReturnValue(undefined);
     mockBuildActiveMusicGenerationTaskPromptContextForSession.mockReturnValue(undefined);
@@ -206,6 +219,7 @@ describe("shouldSkipLocalCliCredentialEpoch", () => {
 
   afterEach(() => {
     cliBackendsTesting.resetDepsForTest();
+    getRuntimeConfigMock.mockReset();
     mockGetGlobalHookRunner.mockReset();
     mockBuildActiveImageGenerationTaskPromptContextForSession.mockReset();
     mockBuildActiveVideoGenerationTaskPromptContextForSession.mockReset();

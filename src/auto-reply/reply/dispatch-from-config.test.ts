@@ -160,6 +160,13 @@ const sessionStoreMocks = vi.hoisted(() => ({
       return { existing: existing ?? sessionStoreMocks.currentEntry };
     },
   ),
+  readSessionEntry: vi.fn((_file: string, sessionKey: string) =>
+    sessionStoreMocks.getSessionEntry({ sessionKey }),
+  ),
+  resolveSessionStoreEntry: vi.fn(
+    (store: Record<string, Record<string, unknown>>, sessionKey: string) =>
+      sessionStoreMocks.resolveSessionRowEntry({ store, sessionKey }).existing,
+  ),
   upsertSessionEntry: vi.fn((params: { sessionKey?: string; entry: Record<string, unknown> }) => {
     sessionStoreMocks.currentEntry = {
       sessionKey: params.sessionKey,
@@ -1917,7 +1924,6 @@ describe("dispatchReplyFromConfig", () => {
     sessionStoreMocks.currentEntry = {
       verboseLevel: "on",
     };
-    sessionStoreMocks.readSessionEntry.mockReturnValue({ verboseLevel: "off" });
     const cfg = {
       ...emptyConfig,
       agents: {
@@ -1938,9 +1944,7 @@ describe("dispatchReplyFromConfig", () => {
       opts?: GetReplyOptions,
       _cfg?: OpenClawConfig,
     ) => {
-      sessionStoreMocks.loadSessionStore.mockClear();
-      sessionStoreMocks.resolveSessionStoreEntry.mockClear();
-      sessionStoreMocks.readSessionEntry.mockClear();
+      sessionStoreMocks.getSessionEntry.mockClear();
       await opts?.onPlanUpdate?.({
         phase: "update",
         explanation: "Inspect code, patch it, run tests.",
@@ -1956,12 +1960,15 @@ describe("dispatchReplyFromConfig", () => {
 
     await dispatchReplyFromConfig({ ctx, cfg, dispatcher, replyResolver });
 
-    expect(sessionStoreMocks.readSessionEntry).toHaveBeenCalledWith(
-      "/tmp/mock-sessions.json",
-      "agent:main:main",
-    );
+    expect(sessionStoreMocks.getSessionEntry).toHaveBeenCalledWith({
+      agentId: "main",
+      sessionKey: "agent:main:main",
+    });
     expect(sessionStoreMocks.loadSessionStore).not.toHaveBeenCalled();
-    expect(sessionStoreMocks.resolveSessionStoreEntry).not.toHaveBeenCalled();
+    expect(sessionStoreMocks.resolveSessionRowEntry).toHaveBeenCalledWith({
+      entries: {},
+      sessionKey: "agent:main:main",
+    });
     expect(firstToolResultPayload(dispatcher)).toMatchObject({
       text: "1. Inspect code\n2. Patch code\n3. Run tests",
       isStatusNotice: true,
