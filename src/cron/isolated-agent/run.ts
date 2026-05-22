@@ -1003,7 +1003,7 @@ async function finalizeCronRun(params: {
     await cleanupDirectCronSession({
       job: prepared.input.job,
       agentSessionKey: prepared.agentSessionKey,
-      sessionId: prepared.currentRunSessionId(),
+      sessionId: prepared.cronSession.sessionEntry.sessionId ?? prepared.runSessionId,
       retireReason: "cron-delete-after-run-fatal-error",
     });
     const deliveryTrace = buildCronDeliveryTrace({

@@ -19,9 +19,6 @@ export type SystemEvent = {
   ts: number;
   contextKey?: string | null;
   deliveryContext?: DeliveryContext;
-  forceSenderIsOwnerFalse?: boolean;
-  /** @deprecated Use forceSenderIsOwnerFalse. Kept for installed plugin compatibility. */
-  trusted?: boolean;
 };
 
 const MAX_EVENTS = 20;
@@ -39,9 +36,6 @@ type SystemEventOptions = {
   sessionKey: string;
   contextKey?: string | null;
   deliveryContext?: DeliveryContext;
-  forceSenderIsOwnerFalse?: boolean;
-  /** @deprecated Use forceSenderIsOwnerFalse. Kept for installed plugin compatibility. */
-  trusted?: boolean;
 };
 
 function requireSessionKey(key?: string | null): string {
@@ -78,7 +72,6 @@ function cloneSystemEvent(event: SystemEvent): SystemEvent {
   return {
     ...event,
     ...(event.deliveryContext ? { deliveryContext: { ...event.deliveryContext } } : {}),
-    trusted: event.forceSenderIsOwnerFalse === true ? false : event.trusted,
   };
 }
 
@@ -96,9 +89,8 @@ function findDuplicateInQueue(
   text: string,
   contextKey: string | null,
   deliveryContext: DeliveryContext | undefined,
-  forceSenderIsOwnerFalse: boolean,
 ): boolean {
-  const incoming = { text, contextKey, deliveryContext, forceSenderIsOwnerFalse };
+  const incoming = { text, contextKey, deliveryContext };
   if (contextKey === null) {
     const last = queue[queue.length - 1];
     return last ? isDuplicateSystemEvent(last, incoming) : false;
@@ -115,17 +107,7 @@ export function enqueueSystemEvent(text: string, options: SystemEventOptions) {
   }
   const normalizedContextKey = normalizeContextKey(options.contextKey);
   const normalizedDeliveryContext = normalizeDeliveryContext(options.deliveryContext);
-  const forceSenderIsOwnerFalse =
-    options.forceSenderIsOwnerFalse === true || options.trusted === false;
-  if (
-    findDuplicateInQueue(
-      entry.queue,
-      cleaned,
-      normalizedContextKey,
-      normalizedDeliveryContext,
-      forceSenderIsOwnerFalse,
-    )
-  ) {
+  if (findDuplicateInQueue(entry.queue, cleaned, normalizedContextKey, normalizedDeliveryContext)) {
     return false;
   }
   if (normalizedContextKey !== null) {
@@ -136,8 +118,6 @@ export function enqueueSystemEvent(text: string, options: SystemEventOptions) {
     ts: Date.now(),
     contextKey: normalizedContextKey,
     deliveryContext: normalizedDeliveryContext,
-    forceSenderIsOwnerFalse,
-    trusted: !forceSenderIsOwnerFalse,
   });
   if (entry.queue.length > MAX_EVENTS) {
     entry.queue.shift();
@@ -170,15 +150,11 @@ function areDeliveryContextsEqual(left?: DeliveryContext, right?: DeliveryContex
 
 function isDuplicateSystemEvent(
   existing: SystemEvent,
-  incoming: Pick<
-    SystemEvent,
-    "text" | "contextKey" | "deliveryContext" | "forceSenderIsOwnerFalse"
-  >,
+  incoming: Pick<SystemEvent, "text" | "contextKey" | "deliveryContext">,
 ): boolean {
   return (
     existing.text === incoming.text &&
     (existing.contextKey ?? null) === (incoming.contextKey ?? null) &&
-    (existing.forceSenderIsOwnerFalse === true) === (incoming.forceSenderIsOwnerFalse === true) &&
     areDeliveryContextsEqual(existing.deliveryContext, incoming.deliveryContext)
   );
 }
@@ -188,7 +164,6 @@ function areSystemEventsEqual(left: SystemEvent, right: SystemEvent): boolean {
     left.text === right.text &&
     left.ts === right.ts &&
     (left.contextKey ?? null) === (right.contextKey ?? null) &&
-    (left.forceSenderIsOwnerFalse === true) === (right.forceSenderIsOwnerFalse === true) &&
     areDeliveryContextsEqual(left.deliveryContext, right.deliveryContext)
   );
 }
