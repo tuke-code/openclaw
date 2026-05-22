@@ -34,11 +34,13 @@ import {
 import { resolveGatewayInstallEntrypoint } from "../../daemon/gateway-entrypoint.js";
 import { disableCurrentOpenClawUpdateLaunchdJob } from "../../daemon/launchd.js";
 import { resolveGatewayRestartLogPath } from "../../daemon/restart-logs.js";
+import { isNodeRuntime } from "../../daemon/runtime-binary.js";
 import { summarizeGatewayServiceLayout } from "../../daemon/service-layout.js";
 import {
   readGatewayServiceState,
   resolveGatewayService,
   type GatewayService,
+  type GatewayServiceCommandConfig,
 } from "../../daemon/service.js";
 import { createLowDiskSpaceWarning } from "../../infra/disk-space.js";
 import { pathExists } from "../../infra/fs-safe.js";
@@ -974,6 +976,8 @@ function tryResolveInvocationCwd(): string | undefined {
 
 async function resolvePackageRuntimePreflightError(params: {
   tag: string;
+  nodeVersion?: string | null;
+  nodeVersionSource?: string;
   timeoutMs?: number;
 }): Promise<string | null> {
   if (!canResolveRegistryVersionForPackageTarget(params.tag)) {
@@ -990,18 +994,60 @@ async function resolvePackageRuntimePreflightError(params: {
   if (status.error) {
     return null;
   }
-  const satisfies = nodeVersionSatisfiesEngine(process.versions.node ?? null, status.nodeEngine);
+  const nodeVersion = params.nodeVersion ?? process.versions.node ?? null;
+  const satisfies = nodeVersionSatisfiesEngine(nodeVersion, status.nodeEngine);
   if (satisfies !== false) {
     return null;
   }
   const targetLabel = status.version ?? target;
+  const nodeLabel = params.nodeVersionSource ? `${params.nodeVersionSource} Node` : "Node";
   return [
-    `Node ${process.versions.node ?? "unknown"} is too old for openclaw@${targetLabel}.`,
+    `${nodeLabel} ${nodeVersion ?? "unknown"} is too old for openclaw@${targetLabel}.`,
     `The requested package requires ${status.nodeEngine}.`,
     "Upgrade Node to 24 or newer, then rerun `openclaw update`.",
     "Bare `npm i -g openclaw` can silently install an older compatible release.",
     "After upgrading Node, use `npm i -g openclaw@latest`.",
   ].join("\n");
+}
+
+function parseNodeVersionOutput(output: string): string | null {
+  const firstLine = output.trim().split(/\r?\n/u)[0]?.trim();
+  if (!firstLine) {
+    return null;
+  }
+  const match = firstLine.match(/^v?(\d+\.\d+\.\d+)(?:\b|$)/u);
+  return match?.[1] ?? null;
+}
+
+function resolveServiceNodeRunner(command: GatewayServiceCommandConfig | null): string | null {
+  const runner = command?.programArguments[0]?.trim();
+  if (!runner || !isNodeRuntime(runner)) {
+    return null;
+  }
+  return runner;
+}
+
+async function resolveManagedServiceNodeVersion(params: {
+  timeoutMs: number;
+}): Promise<{ version: string; runner: string } | null> {
+  const service = resolveGatewayService();
+  const command = await service.readCommand(process.env).catch(() => null);
+  const runner = resolveServiceNodeRunner(command);
+  if (!runner) {
+    return null;
+  }
+  const result = await runCommandWithTimeout([runner, "--version"], {
+    env: {
+      ...process.env,
+      ...command?.environment,
+    },
+    timeoutMs: Math.min(params.timeoutMs, 10_000),
+  }).catch(() => null);
+  if (!result || result.code !== 0) {
+    return null;
+  }
+  const version = parseNodeVersionOutput(result.stdout || result.stderr);
+  return version ? { version, runner } : null;
 }
 
 function resolveServiceRefreshEnv(
@@ -3084,8 +3130,17 @@ export async function updateCommand(opts: UpdateCommandOptions): Promise<void> {
       defaultRuntime.exit(1);
       return;
     }
+    const managedServiceNode = await resolveManagedServiceNodeVersion({
+      timeoutMs: updateStepTimeoutMs,
+    });
     const runtimePreflightError = await resolvePackageRuntimePreflightError({
       tag,
+      ...(managedServiceNode
+        ? {
+            nodeVersion: managedServiceNode.version,
+            nodeVersionSource: "Managed service",
+          }
+        : {}),
       timeoutMs,
     });
     if (runtimePreflightError) {

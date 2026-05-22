@@ -2117,6 +2117,43 @@ describe("update-cli", () => {
     );
   });
 
+  it("checks the managed service Node runtime before package updates", async () => {
+    mockPackageInstallStatus(createCaseDir("openclaw-update"));
+    serviceReadCommand.mockResolvedValue({
+      programArguments: ["/managed/bin/node", "/managed/openclaw/dist/index.js", "gateway"],
+      environment: { PATH: "/managed/bin" },
+    });
+    vi.mocked(runCommandWithTimeout).mockImplementation(async (argv) => {
+      if (argv[0] === "/managed/bin/node" && argv[1] === "--version") {
+        return {
+          stdout: "v22.18.0\n",
+          stderr: "",
+          code: 0,
+          signal: null,
+          killed: false,
+          termination: "exit",
+        };
+      }
+      return {
+        stdout: "",
+        stderr: "",
+        code: 0,
+        signal: null,
+        killed: false,
+        termination: "exit",
+      };
+    });
+    nodeVersionSatisfiesEngine.mockReturnValue(false);
+
+    await updateCommand({ yes: true });
+
+    expect(nodeVersionSatisfiesEngine).toHaveBeenCalledWith("22.18.0", ">=22.19.0");
+    expect(packageInstallCommandCall()).toBeUndefined();
+    expect(defaultRuntime.exit).toHaveBeenCalledWith(1);
+    const errors = vi.mocked(defaultRuntime.error).mock.calls.map((call) => String(call[0]));
+    expect(errors.join("\n")).toContain("Managed service Node 22.18.0 is too old");
+  });
+
   it.each([
     {
       name: "explicit dist-tag",

@@ -221,14 +221,14 @@ describe("json file helpers", () => {
       return () => callCount;
     }
 
-    it("throws JsonFileReadError when the target changes during read", async () => {
+    it("retries readJson when the target changes once during read", async () => {
       await withTempDir({ prefix: "openclaw-json-files-retry-" }, async (base) => {
         const filePath = path.join(base, "config.json");
         await fsPromises.writeFile(filePath, '{"ok":true}', "utf8");
 
         const getCalls = setupLstatSpy(filePath, 1);
 
-        await expect(readJson<{ ok: boolean }>(filePath)).rejects.toThrow(JsonFileReadError);
+        await expect(readJson<{ ok: boolean }>(filePath)).resolves.toEqual({ ok: true });
         expect(getCalls()).toBeGreaterThanOrEqual(1);
       });
     });
