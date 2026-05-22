@@ -393,6 +393,7 @@ export const ar: TranslationMap = {
   tabs: {
     agents: "الوكلاء",
     overview: "نظرة عامة",
+    workboard: "لوحة العمل",
     channels: "القنوات",
     instances: "المثيلات",
     sessions: "الجلسات",
@@ -414,6 +415,7 @@ export const ar: TranslationMap = {
   subtitles: {
     agents: "مساحات العمل، والأدوات، والهويات.",
     overview: "الحالة، ونقاط الدخول، والصحة.",
+    workboard: "قائمة عمل الوكيل وتسليم الجلسات.",
     channels: "القنوات والإعدادات.",
     instances: "العملاء والعقد المتصلة.",
     sessions: "الجلسات النشطة والافتراضيات.",

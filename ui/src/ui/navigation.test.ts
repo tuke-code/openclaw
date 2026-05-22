@@ -29,6 +29,7 @@ describe("iconForTab", () => {
     expect(Object.fromEntries(ALL_TABS.map((tab) => [tab, iconForTab(tab)]))).toEqual({
       chat: "messageSquare",
       overview: "barChart",
+      workboard: "folder",
       channels: "link",
       instances: "radio",
       sessions: "fileText",
@@ -61,6 +62,7 @@ describe("titleForTab", () => {
     expect(Object.fromEntries(ALL_TABS.map((tab) => [tab, titleForTab(tab)]))).toEqual({
       chat: "Chat",
       overview: "Overview",
+      workboard: "Workboard",
       channels: "Channels",
       instances: "Instances",
       sessions: "Sessions",
@@ -87,6 +89,7 @@ describe("subtitleForTab", () => {
     expect(Object.fromEntries(ALL_TABS.map((tab) => [tab, subtitleForTab(tab)]))).toEqual({
       chat: "Gateway chat for quick interventions.",
       overview: "Status, entry points, health.",
+      workboard: "Agent work queue and session handoff.",
       channels: "Channels and settings.",
       instances: "Connected clients and nodes.",
       sessions: "Active sessions and defaults.",

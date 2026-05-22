@@ -395,6 +395,7 @@ export const fa: TranslationMap = {
   tabs: {
     agents: "عامل‌ها",
     overview: "نمای کلی",
+    workboard: "تابلوی کار",
     channels: "کانال‌ها",
     instances: "نمونه‌ها",
     sessions: "نشست‌ها",
@@ -416,6 +417,7 @@ export const fa: TranslationMap = {
   subtitles: {
     agents: "فضاهای کاری، ابزارها، هویت‌ها.",
     overview: "وضعیت، نقاط ورود، سلامت.",
+    workboard: "صف کار عامل و واگذاری جلسه.",
     channels: "کانال‌ها و تنظیمات.",
     instances: "کلاینت‌ها و گره‌های متصل.",
     sessions: "نشست‌های فعال و پیش‌فرض‌ها.",

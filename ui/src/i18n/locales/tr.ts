@@ -396,6 +396,7 @@ export const tr: TranslationMap = {
   tabs: {
     agents: "Aracılar",
     overview: "Genel Bakış",
+    workboard: "Çalışma panosu",
     channels: "Kanallar",
     instances: "Örnekler",
     sessions: "Oturumlar",
@@ -417,6 +418,7 @@ export const tr: TranslationMap = {
   subtitles: {
     agents: "Çalışma alanları, araçlar, kimlikler.",
     overview: "Durum, giriş noktaları, sağlık.",
+    workboard: "Ajan iş kuyruğu ve oturum devri.",
     channels: "Kanallar ve ayarlar.",
     instances: "Bağlı istemciler ve düğümler.",
     sessions: "Etkin oturumlar ve varsayılanlar.",

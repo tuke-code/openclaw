@@ -396,6 +396,7 @@ export const nl: TranslationMap = {
   tabs: {
     agents: "Agents",
     overview: "Overzicht",
+    workboard: "Werkbord",
     channels: "Kanalen",
     instances: "Instanties",
     sessions: "Sessies",
@@ -417,6 +418,7 @@ export const nl: TranslationMap = {
   subtitles: {
     agents: "Werkruimten, tools, identiteiten.",
     overview: "Status, toegangspunten, gezondheid.",
+    workboard: "Werkwachtrij voor agents en sessieoverdracht.",
     channels: "Kanalen en instellingen.",
     instances: "Verbonden clients en nodes.",
     sessions: "Actieve sessies en standaarden.",

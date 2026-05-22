@@ -10,6 +10,7 @@ Docs: https://docs.openclaw.ai
 - Docs: clarify media provider credentials, Codex/OpenClaw code-mode boundaries, Slack and Telegram ack reactions, Feishu dynamic agents, secrets plaintext boundaries, memory guidance, and Chinese glossary terms. Thanks @nielskaspers, @cosmopolitan033, @drclaw-iq, @alexgduarte, @zccyman, @chengoak, and @cassthebandit.
 - Packaging: exclude documentation images and assets from the npm tarball, reducing published package size without affecting runtime docs search or CLI behavior. Thanks @SebTardif.
 - Agents/subagents: limit default sub-agent bootstrap context to `AGENTS.md` and `TOOLS.md`, keeping persona, identity, user, memory, heartbeat, and setup files out of delegated workers by default. (#85283) Thanks @100yenadmin.
+- Control UI: add a Workboard dashboard tab backed by a bundled plugin for Kanban-style agent work cards and session handoff.
 - Maintainer skills: exclude plugin SDK/API boundary work from `openclaw-landable-bug-sweep` so bugbash sweeps stay focused on small paper-cut fixes.
 - Plugin SDK: add a generic channel-message poll sender so channel plugins can expose poll delivery without depending on channel-specific SDK facades.
 - Crabbox: keep the local wrapper's provider validation synced with the installed Crabbox binary while preserving supported aliases such as `docker` and `blacksmith`. (#85302) Thanks @hxy91819.

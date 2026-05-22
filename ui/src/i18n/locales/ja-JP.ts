@@ -397,6 +397,7 @@ export const ja_JP: TranslationMap = {
   tabs: {
     agents: "エージェント",
     overview: "概要",
+    workboard: "ワークボード",
     channels: "チャンネル",
     instances: "インスタンス",
     sessions: "セッション",
@@ -418,6 +419,7 @@ export const ja_JP: TranslationMap = {
   subtitles: {
     agents: "ワークスペース、ツール、ID。",
     overview: "ステータス、エントリーポイント、健全性。",
+    workboard: "エージェントの作業キューとセッションの引き継ぎ。",
     channels: "チャンネルと設定。",
     instances: "接続されたクライアントとノード。",
     sessions: "アクティブなセッションとデフォルト。",
