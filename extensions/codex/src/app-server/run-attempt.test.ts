@@ -858,8 +858,7 @@ describe("runCodexAppServerAttempt", () => {
 
     await factoryOptions?.onYield?.("Waiting for subagent.");
     expect(yieldDetected).toBe(true);
-    expect(runAbortController.signal.aborted).toBe(true);
-    expect(runAbortController.signal.reason).toBe("sessions_yield");
+    expect(runAbortController.signal.aborted).toBe(false);
   });
 
   it("exposes OpenClaw sandbox shell tools under distinct names for non-Docker sandbox backends", async () => {
