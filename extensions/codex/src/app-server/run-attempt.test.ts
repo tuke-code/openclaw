@@ -1089,7 +1089,7 @@ describe("runCodexAppServerAttempt", () => {
       pluginConfig: {},
       onYieldDetected: () => undefined,
     });
-    const request = vi.fn(async (method: string) => {
+    const request = vi.fn(async (method: string, _params?: unknown) => {
       if (method === "thread/start") {
         return threadStartResult();
       }
@@ -1100,7 +1100,7 @@ describe("runCodexAppServerAttempt", () => {
       client: { request } as never,
       params,
       cwd: workspaceDir,
-      dynamicTools,
+      dynamicTools: dynamicTools as never,
       appServer: createThreadLifecycleAppServerOptions(),
       nativeCodeModeEnabled: nativeToolSurfaceEnabled,
       nativeCodeModeOnlyEnabled: false,
