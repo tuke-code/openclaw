@@ -6,6 +6,7 @@ import {
 } from "openclaw/plugin-sdk/command-auth-native";
 import type {
   OpenClawConfig,
+  DmPolicy,
   TelegramAccountConfig,
   TelegramDirectConfig,
   TelegramGroupConfig,
@@ -16,7 +17,13 @@ import { readChannelAllowFromStore } from "openclaw/plugin-sdk/conversation-runt
 import { normalizeAccountId } from "openclaw/plugin-sdk/routing";
 import { normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { expandTelegramAllowFromWithAccessGroups } from "../access-groups.js";
-import { firstDefined, normalizeAllowFrom, type NormalizedAllowFrom } from "../bot-access.js";
+import {
+  firstDefined,
+  isSenderAllowed,
+  normalizeAllowFrom,
+  resolveTelegramEffectiveDmPolicy,
+  type NormalizedAllowFrom,
+} from "../bot-access.js";
 import { normalizeTelegramReplyToMessageId } from "../outbound-params.js";
 import { resolveTelegramPreviewStreamMode } from "../preview-streaming.js";
 import {
@@ -194,6 +201,8 @@ export async function resolveTelegramGroupAllowFromContext(params: {
   cfg?: OpenClawConfig;
   chatId: string | number;
   accountId?: string;
+  dmPolicy?: DmPolicy;
+  allowFrom?: Array<string | number>;
   senderId?: string;
   isGroup?: boolean;
   isForum?: boolean;
@@ -227,16 +236,34 @@ export async function resolveTelegramGroupAllowFromContext(params: {
   const resolvedThreadId = threadSpec.scope === "forum" ? threadSpec.id : undefined;
   const dmThreadId = threadSpec.scope === "dm" ? threadSpec.id : undefined;
   const threadIdForConfig = resolvedThreadId ?? dmThreadId;
-  const storeAllowFrom = await (params.readChannelAllowFromStore ?? readChannelAllowFromStore)(
-    "telegram",
-    process.env,
-    accountId,
-  ).catch(() => []);
   const { groupConfig, topicConfig } = params.resolveTelegramGroupConfig(
     params.chatId,
     threadIdForConfig,
   );
   const groupAllowOverride = firstDefined(topicConfig?.allowFrom, groupConfig?.allowFrom);
+  const effectiveDmPolicy = resolveTelegramEffectiveDmPolicy({
+    isGroup: params.isGroup ?? false,
+    groupConfig,
+    dmPolicy: params.dmPolicy,
+  });
+  const shouldReadPairingStore = params.isGroup !== true && effectiveDmPolicy === "pairing";
+  const configuredDmAllowed = shouldReadPairingStore
+    ? await isTelegramDmAllowedByConfiguredAllowFrom({
+        cfg: params.cfg,
+        allowFrom: params.allowFrom,
+        groupAllowOverride,
+        accountId,
+        senderId: params.senderId,
+      })
+    : false;
+  const storeAllowFrom =
+    shouldReadPairingStore && !configuredDmAllowed
+      ? await (params.readChannelAllowFromStore ?? readChannelAllowFromStore)(
+          "telegram",
+          process.env,
+          accountId,
+        )
+      : [];
   const expandedGroupAllowFrom = await expandTelegramAllowFromWithAccessGroups({
     cfg: params.cfg,
     allowFrom: groupAllowOverride ?? params.groupAllowFrom,
@@ -257,6 +284,33 @@ export async function resolveTelegramGroupAllowFromContext(params: {
     effectiveGroupAllow,
     hasGroupAllowOverride,
   };
+}
+
+export async function isTelegramDmAllowedByConfiguredAllowFrom(params: {
+  cfg?: OpenClawConfig;
+  allowFrom?: Array<string | number>;
+  groupAllowOverride?: Array<string | number>;
+  accountId: string;
+  senderId?: string;
+}): Promise<boolean> {
+  const configuredAllowFrom = params.groupAllowOverride ?? params.allowFrom;
+  if (!configuredAllowFrom || configuredAllowFrom.length === 0) {
+    return false;
+  }
+  const expandedAllowFrom = await expandTelegramAllowFromWithAccessGroups({
+    cfg: params.cfg,
+    allowFrom: configuredAllowFrom,
+    accountId: params.accountId,
+    senderId: params.senderId,
+  });
+  const normalizedAllowFrom = normalizeAllowFrom(expandedAllowFrom);
+  return (
+    normalizedAllowFrom.hasEntries &&
+    isSenderAllowed({
+      allow: normalizedAllowFrom,
+      senderId: params.senderId,
+    })
+  );
 }
 
 /**

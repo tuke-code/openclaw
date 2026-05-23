@@ -89,6 +89,7 @@ import {
   resolveTelegramForumFlag,
   resolveTelegramForumThreadId,
   resolveTelegramGroupAllowFromContext,
+  isTelegramDmAllowedByConfiguredAllowFrom,
   shouldUseTelegramDmThreadSession,
   withResolvedTelegramForumFlag,
 } from "./bot/helpers.js";
@@ -935,7 +936,7 @@ export const registerTelegramHandlers = ({
         date: last.msg.date ?? first.msg.date,
       });
 
-      const storeAllowFrom = await loadStoreAllowFrom();
+      const storeAllowFrom = await loadStoreAllowFrom(first.msg);
       const baseCtx = first.ctx;
 
       const syntheticCtx = buildSyntheticContext(baseCtx, syntheticMessage);
@@ -976,8 +977,36 @@ export const registerTelegramHandlers = ({
     }, TELEGRAM_TEXT_FRAGMENT_MAX_GAP_MS);
   };
 
-  const loadStoreAllowFrom = async () =>
-    telegramDeps.readChannelAllowFromStore("telegram", process.env, accountId).catch(() => []);
+  const loadStoreAllowFrom = async (msg: Message) => {
+    const isGroup = msg.chat.type !== "private";
+    if (isGroup) {
+      return [];
+    }
+    const { groupConfig, topicConfig } = resolveTelegramGroupConfig(
+      msg.chat.id,
+      msg.message_thread_id,
+    );
+    const groupAllowOverride = firstDefined(topicConfig?.allowFrom, groupConfig?.allowFrom);
+    const effectiveDmPolicy = resolveTelegramEffectiveDmPolicy({
+      isGroup,
+      groupConfig,
+      dmPolicy: telegramCfg.dmPolicy,
+    });
+    if (effectiveDmPolicy !== "pairing") {
+      return [];
+    }
+    const senderId = msg.from?.id != null ? String(msg.from.id) : undefined;
+    const configuredDmAllowed = await isTelegramDmAllowedByConfiguredAllowFrom({
+      cfg,
+      allowFrom,
+      groupAllowOverride,
+      accountId,
+      senderId,
+    });
+    return configuredDmAllowed
+      ? []
+      : await telegramDeps.readChannelAllowFromStore("telegram", process.env, accountId);
+  };
 
   const recordMessageForReplyChain = (msg: Message, threadId?: number) =>
     messageCache.record({
@@ -1318,6 +1347,8 @@ export const registerTelegramHandlers = ({
         cfg,
         chatId: params.chatId,
         accountId,
+        dmPolicy: telegramCfg.dmPolicy,
+        allowFrom,
         senderId: params.senderId,
         isGroup: params.isGroup,
         isForum: params.isForum,

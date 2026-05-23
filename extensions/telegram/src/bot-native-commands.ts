@@ -521,6 +521,8 @@ async function resolveTelegramCommandAuth(params: {
     cfg,
     chatId,
     accountId,
+    dmPolicy: telegramCfg.dmPolicy,
+    allowFrom,
     senderId,
     isGroup,
     isForum,
