@@ -1058,8 +1058,9 @@ describe("runCodexAppServerAttempt", () => {
   });
 
   it("starts active OpenClaw sandbox turns with Codex native execution disabled", async () => {
-    const restoreSandboxBackend = registerSandboxBackend("codex-test-sandbox", async () => ({
-      id: "codex-test-sandbox",
+    const sandboxBackendId = "codex-native-disabled-test-sandbox";
+    const restoreSandboxBackend = registerSandboxBackend(sandboxBackendId, async () => ({
+      id: sandboxBackendId,
       runtimeId: "codex-test-runtime",
       runtimeLabel: "Codex Test Sandbox",
       workdir: "/workspace",
@@ -1090,13 +1091,20 @@ describe("runCodexAppServerAttempt", () => {
           defaults: {
             sandbox: {
               mode: "all",
-              backend: "codex-test-sandbox",
+              backend: sandboxBackendId,
               scope: "session",
             },
           },
         },
       } as never;
-      const { clientFactory, requests, waitForMethod, completeTurn } = createStartedThreadHarness();
+      const { clientFactory, requests, waitForMethod } = createStartedThreadHarness(
+        async (method) => {
+          if (method === "turn/start") {
+            return turnStartResult("turn-1", "completed");
+          }
+          return undefined;
+        },
+      );
       const abortController = new AbortController();
       params.abortSignal = abortController.signal;
 
@@ -1106,7 +1114,6 @@ describe("runCodexAppServerAttempt", () => {
       });
       try {
         await waitForMethod("turn/start");
-        await completeTurn({ threadId: "thread-1", turnId: "turn-1" });
         await run;
       } catch (error) {
         abortController.abort("test_cleanup");
@@ -1132,8 +1139,9 @@ describe("runCodexAppServerAttempt", () => {
   });
 
   it("routes native Codex execution through an OpenClaw sandbox exec-server when opted in", async () => {
-    const restoreSandboxBackend = registerSandboxBackend("codex-test-sandbox", async () => ({
-      id: "codex-test-sandbox",
+    const sandboxBackendId = "codex-native-exec-server-test-sandbox";
+    const restoreSandboxBackend = registerSandboxBackend(sandboxBackendId, async () => ({
+      id: sandboxBackendId,
       runtimeId: "codex-test-runtime",
       runtimeLabel: "Codex Test Sandbox",
       workdir: "/workspace",
@@ -1164,13 +1172,20 @@ describe("runCodexAppServerAttempt", () => {
           defaults: {
             sandbox: {
               mode: "all",
-              backend: "codex-test-sandbox",
+              backend: sandboxBackendId,
               scope: "session",
             },
           },
         },
       } as never;
-      const { clientFactory, requests, waitForMethod, completeTurn } = createStartedThreadHarness();
+      const { clientFactory, requests, waitForMethod } = createStartedThreadHarness(
+        async (method) => {
+          if (method === "turn/start") {
+            return turnStartResult("turn-1", "completed");
+          }
+          return undefined;
+        },
+      );
       const abortController = new AbortController();
       params.abortSignal = abortController.signal;
 
@@ -1185,7 +1200,6 @@ describe("runCodexAppServerAttempt", () => {
       });
       try {
         await waitForMethod("turn/start");
-        await completeTurn({ threadId: "thread-1", turnId: "turn-1" });
         await run;
       } catch (error) {
         abortController.abort("test_cleanup");
