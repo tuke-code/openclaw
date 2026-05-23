@@ -329,7 +329,11 @@ function createAppServerHarness(
     return requestImpl(method, params, requestOptions as { signal?: AbortSignal } | undefined);
   });
 
-  setCodexAppServerClientFactoryForTest(async (_startOptions, authProfileId, agentDir) => {
+  const clientFactory: CodexAppServerClientFactory = async (
+    _startOptions,
+    authProfileId,
+    agentDir,
+  ) => {
     options.onStart?.(authProfileId, agentDir);
     return {
       getServerVersion: () => "0.132.0",
@@ -347,7 +351,8 @@ function createAppServerHarness(
         return () => closeHandlers.delete(handler);
       },
     } as never;
-  });
+  };
+  setCodexAppServerClientFactoryForTest(clientFactory);
 
   const waitForServerRequestHandler = async () => {
     await vi.waitFor(() => expect(handleServerRequest).toBeTypeOf("function"), {
@@ -358,6 +363,7 @@ function createAppServerHarness(
   };
 
   return {
+    clientFactory,
     request,
     requests,
     async waitForMethod(method: string, timeoutMs = 30_000) {
@@ -1090,14 +1096,23 @@ describe("runCodexAppServerAttempt", () => {
           },
         },
       } as never;
-      const { requests, waitForMethod, completeTurn } = createStartedThreadHarness();
+      const { clientFactory, requests, waitForMethod, completeTurn } = createStartedThreadHarness();
+      const abortController = new AbortController();
+      params.abortSignal = abortController.signal;
 
       const run = runCodexAppServerAttempt(params, {
+        clientFactory,
         pluginConfig: { appServer: { mode: "yolo" } },
       });
-      await waitForMethod("turn/start");
-      await completeTurn({ threadId: "thread-1", turnId: "turn-1" });
-      await run;
+      try {
+        await waitForMethod("turn/start");
+        await completeTurn({ threadId: "thread-1", turnId: "turn-1" });
+        await run;
+      } catch (error) {
+        abortController.abort("test_cleanup");
+        await run.catch(() => undefined);
+        throw error;
+      }
 
       const startRequest = requests.find((request) => request.method === "thread/start");
       const startParams = startRequest?.params as Record<string, unknown> | undefined;
@@ -1155,9 +1170,12 @@ describe("runCodexAppServerAttempt", () => {
           },
         },
       } as never;
-      const { requests, waitForMethod, completeTurn } = createStartedThreadHarness();
+      const { clientFactory, requests, waitForMethod, completeTurn } = createStartedThreadHarness();
+      const abortController = new AbortController();
+      params.abortSignal = abortController.signal;
 
       const run = runCodexAppServerAttempt(params, {
+        clientFactory,
         pluginConfig: {
           appServer: {
             mode: "yolo",
@@ -1165,9 +1183,15 @@ describe("runCodexAppServerAttempt", () => {
           },
         },
       });
-      await waitForMethod("turn/start");
-      await completeTurn({ threadId: "thread-1", turnId: "turn-1" });
-      await run;
+      try {
+        await waitForMethod("turn/start");
+        await completeTurn({ threadId: "thread-1", turnId: "turn-1" });
+        await run;
+      } catch (error) {
+        abortController.abort("test_cleanup");
+        await run.catch(() => undefined);
+        throw error;
+      }
 
       const environmentAdd = requests.find((request) => request.method === "environment/add");
       const environmentAddParams = environmentAdd?.params as
