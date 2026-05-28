@@ -154,6 +154,41 @@ describe("Codex Computer Use setup", () => {
     expectRequestMethodNotCalled(request, "plugin/read");
   });
 
+  it("fails closed when Computer Use marketplace discovery is unreadable", async () => {
+    const request = vi.fn(async (method: string) => {
+      if (method === "experimentalFeature/enablement/set") {
+        return { enablement: { plugins: true } };
+      }
+      if (method === "plugin/list") {
+        return {
+          get marketplaces() {
+            throw new Error("fuzzplugin marketplaces read failed");
+          },
+        };
+      }
+      throw new Error(`unexpected request ${method}`);
+    }) as CodexComputerUseRequest;
+
+    await expectSetupErrorStatus(
+      installCodexComputerUse({
+        pluginConfig: {
+          computerUse: {
+            marketplaceName: "fuzzplugin-tools",
+          },
+        },
+        request,
+      }),
+      {
+        ready: false,
+        reason: "marketplace_missing",
+        message:
+          "Configured Codex marketplace fuzzplugin-tools was not found or does not contain computer-use. Run /codex computer-use install with a source or path to install from a new marketplace.",
+      },
+    );
+    expectRequestMethodNotCalled(request, "plugin/read");
+    expectRequestMethodNotCalled(request, "plugin/install");
+  });
+
   it("installs Computer Use from a configured marketplace source", async () => {
     const request = createComputerUseRequest({ installed: false });
 

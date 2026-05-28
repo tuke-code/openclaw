@@ -11,7 +11,6 @@ import type {
   CodexListMcpServerStatusResponse,
   CodexMcpServerStatus,
   CodexPluginDetail,
-  CodexPluginListResponse,
   CodexPluginReadResponse,
   CodexRequestObject,
   JsonValue,
@@ -399,7 +398,7 @@ async function listComputerUseMarketplaceCandidates(
   request: CodexComputerUseRequest,
   config: ResolvedCodexComputerUseConfig,
 ): Promise<MarketplaceRef[]> {
-  const listed = await request<CodexPluginListResponse>("plugin/list", {
+  const listed = await request<unknown>("plugin/list", {
     cwds: [],
   } satisfies CodexRequestObject);
   return findComputerUseMarketplaces(listed, config.pluginName);
@@ -434,25 +433,46 @@ function shouldAddBundledComputerUseMarketplace(params: {
   );
 }
 
-function findComputerUseMarketplaces(
-  listed: CodexPluginListResponse,
+function findComputerUseMarketplaces(listed: unknown, pluginName: string): MarketplaceRef[] {
+  return readArrayField(listed, "marketplaces").flatMap((marketplace) =>
+    normalizeComputerUseMarketplace(marketplace, pluginName),
+  );
+}
+
+function normalizeComputerUseMarketplace(value: unknown, pluginName: string): MarketplaceRef[] {
+  const marketplace = asRecord(value);
+  if (!marketplace) {
+    return [];
+  }
+  const name = readStringField(marketplace, "name");
+  if (!name) {
+    return [];
+  }
+  const hasPlugin = readArrayField(marketplace, "plugins").some((plugin) =>
+    matchesComputerUsePlugin(plugin, pluginName, name),
+  );
+  if (!hasPlugin) {
+    return [];
+  }
+  const path = readStringField(marketplace, "path");
+  if (path) {
+    return [{ kind: "local", name, path }];
+  }
+  return [{ kind: "remote", name, remoteMarketplaceName: name }];
+}
+
+function matchesComputerUsePlugin(
+  value: unknown,
   pluginName: string,
-): MarketplaceRef[] {
-  return listed.marketplaces
-    .filter((marketplace) =>
-      marketplace.plugins.some(
-        (plugin) =>
-          plugin.name === pluginName ||
-          plugin.id === pluginName ||
-          plugin.id === `${pluginName}@${marketplace.name}`,
-      ),
-    )
-    .map((marketplace) => {
-      if (marketplace.path) {
-        return { kind: "local", name: marketplace.name, path: marketplace.path };
-      }
-      return { kind: "remote", name: marketplace.name, remoteMarketplaceName: marketplace.name };
-    });
+  marketplaceName: string,
+): boolean {
+  const plugin = asRecord(value);
+  if (!plugin) {
+    return false;
+  }
+  const name = readStringField(plugin, "name");
+  const id = readStringField(plugin, "id");
+  return name === pluginName || id === pluginName || id === `${pluginName}@${marketplaceName}`;
 }
 
 function chooseKnownComputerUseMarketplace(
@@ -680,4 +700,32 @@ function resolveComputerUseConfig(
     pluginConfig: params.pluginConfig,
     overrides,
   });
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function readArrayField(value: unknown, key: string): unknown[] {
+  const record = asRecord(value);
+  if (!record) {
+    return [];
+  }
+  try {
+    const field = record[key];
+    return Array.isArray(field) ? field : [];
+  } catch {
+    return [];
+  }
+}
+
+function readStringField(record: Record<string, unknown>, key: string): string | undefined {
+  try {
+    const value = record[key];
+    return typeof value === "string" && value.trim() ? value : undefined;
+  } catch {
+    return undefined;
+  }
 }
