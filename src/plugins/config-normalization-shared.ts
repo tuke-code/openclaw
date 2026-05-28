@@ -4,7 +4,6 @@ import {
   normalizeOptionalLowercaseString,
   normalizeOptionalString,
 } from "../shared/string-coerce.js";
-import { normalizeArrayBackedTrimmedStringList } from "../shared/string-normalization.js";
 import { defaultSlotIdForKey } from "./slots.js";
 
 export type NormalizedPluginsConfig = {
@@ -46,13 +45,96 @@ export type NormalizePluginId = (id: string) => string;
 
 export const identityNormalizePluginId: NormalizePluginId = (id) => id.trim();
 
-function normalizeList(value: unknown, normalizePluginId: NormalizePluginId): string[] {
+const MAX_PLUGIN_CONFIG_LIST_ENTRIES = 10_000;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function readRecordValue(record: unknown, key: string): unknown {
+  if (!record || typeof record !== "object") {
+    return undefined;
+  }
+  try {
+    return (record as Record<string, unknown>)[key];
+  } catch {
+    return undefined;
+  }
+}
+
+function hasRecordKey(record: unknown, key: string): boolean {
+  if (!record || typeof record !== "object") {
+    return false;
+  }
+  try {
+    return Object.prototype.hasOwnProperty.call(record, key);
+  } catch {
+    return false;
+  }
+}
+
+function copyArrayEntries(value: unknown): unknown[] | undefined {
   if (!Array.isArray(value)) {
+    return undefined;
+  }
+  let length: number;
+  try {
+    length = value.length;
+  } catch {
     return [];
   }
-  return value
+  const safeLength = Math.min(Math.max(0, length), MAX_PLUGIN_CONFIG_LIST_ENTRIES);
+  const entries: unknown[] = [];
+  for (let index = 0; index < safeLength; index += 1) {
+    try {
+      entries.push(value[index]);
+    } catch {
+      entries.push(undefined);
+    }
+  }
+  return entries;
+}
+
+function copyRecordEntries(value: unknown): Array<[string, unknown]> {
+  if (!isRecord(value)) {
+    return [];
+  }
+  let keys: string[];
+  try {
+    keys = Object.keys(value);
+  } catch {
+    return [];
+  }
+  const entries: Array<[string, unknown]> = [];
+  for (const key of keys) {
+    try {
+      entries.push([key, value[key]]);
+    } catch {
+      // Skip unreadable plugin config fields; other readable config still applies.
+    }
+  }
+  return entries;
+}
+
+function normalizeList(value: unknown, normalizePluginId: NormalizePluginId): string[] {
+  const entries = copyArrayEntries(value);
+  if (!entries) {
+    return [];
+  }
+  return entries
     .map((entry) => (typeof entry === "string" ? normalizePluginId(entry) : ""))
     .filter(Boolean);
+}
+
+function normalizeArrayBackedTrimmedStringList(value: unknown): string[] | undefined {
+  const entries = copyArrayEntries(value);
+  if (!entries) {
+    return undefined;
+  }
+  return entries.flatMap((entry) => {
+    const normalized = normalizeOptionalString(entry);
+    return normalized ? [normalized] : [];
+  });
 }
 
 function normalizeSlotValue(value: unknown): string | null | undefined {
@@ -80,11 +162,11 @@ function normalizeHookTimeoutMs(value: unknown): number | undefined {
 }
 
 function normalizeHookTimeouts(value: unknown): Record<string, number> | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
+  if (!isRecord(value)) {
     return undefined;
   }
   const normalized: Record<string, number> = {};
-  for (const [hookName, timeoutMs] of Object.entries(value)) {
+  for (const [hookName, timeoutMs] of copyRecordEntries(value)) {
     const normalizedTimeoutMs = normalizeHookTimeoutMs(timeoutMs);
     if (normalizedTimeoutMs !== undefined) {
       normalized[hookName] = normalizedTimeoutMs;
@@ -97,32 +179,28 @@ function normalizePluginEntries(
   entries: unknown,
   normalizePluginId: NormalizePluginId,
 ): NormalizedPluginsConfig["entries"] {
-  if (!entries || typeof entries !== "object" || Array.isArray(entries)) {
+  if (!isRecord(entries)) {
     return {};
   }
   const normalized: NormalizedPluginsConfig["entries"] = {};
-  for (const [key, value] of Object.entries(entries)) {
+  for (const [key, value] of copyRecordEntries(entries)) {
     const normalizedKey = normalizePluginId(key);
     if (!normalizedKey) {
       continue;
     }
-    if (!value || typeof value !== "object" || Array.isArray(value)) {
+    if (!isRecord(value)) {
       normalized[normalizedKey] = {};
       continue;
     }
-    const entry = value as Record<string, unknown>;
-    const hooksRaw = entry.hooks;
-    const hooks =
-      hooksRaw && typeof hooksRaw === "object" && !Array.isArray(hooksRaw)
-        ? {
-            allowPromptInjection: (hooksRaw as { allowPromptInjection?: unknown })
-              .allowPromptInjection,
-            allowConversationAccess: (hooksRaw as { allowConversationAccess?: unknown })
-              .allowConversationAccess,
-            timeoutMs: normalizeHookTimeoutMs((hooksRaw as { timeoutMs?: unknown }).timeoutMs),
-            timeouts: normalizeHookTimeouts((hooksRaw as { timeouts?: unknown }).timeouts),
-          }
-        : undefined;
+    const hooksRaw = readRecordValue(value, "hooks");
+    const hooks = isRecord(hooksRaw)
+      ? {
+          allowPromptInjection: readRecordValue(hooksRaw, "allowPromptInjection"),
+          allowConversationAccess: readRecordValue(hooksRaw, "allowConversationAccess"),
+          timeoutMs: normalizeHookTimeoutMs(readRecordValue(hooksRaw, "timeoutMs")),
+          timeouts: normalizeHookTimeouts(readRecordValue(hooksRaw, "timeouts")),
+        }
+      : undefined;
     const normalizedHooks =
       hooks &&
       (typeof hooks.allowPromptInjection === "boolean" ||
@@ -140,22 +218,17 @@ function normalizePluginEntries(
             ...(hooks.timeouts !== undefined ? { timeouts: hooks.timeouts } : {}),
           }
         : undefined;
-    const subagentRaw = entry.subagent;
-    const subagent =
-      subagentRaw && typeof subagentRaw === "object" && !Array.isArray(subagentRaw)
-        ? {
-            allowModelOverride: (subagentRaw as { allowModelOverride?: unknown })
-              .allowModelOverride,
-            hasAllowedModelsConfig: Array.isArray(
-              (subagentRaw as { allowedModels?: unknown }).allowedModels,
-            ),
-            allowedModels: Array.isArray((subagentRaw as { allowedModels?: unknown }).allowedModels)
-              ? normalizeArrayBackedTrimmedStringList(
-                  (subagentRaw as { allowedModels?: unknown }).allowedModels,
-                )
-              : undefined,
-          }
-        : undefined;
+    const subagentRaw = readRecordValue(value, "subagent");
+    const subagentAllowedModels = isRecord(subagentRaw)
+      ? readRecordValue(subagentRaw, "allowedModels")
+      : undefined;
+    const subagent = isRecord(subagentRaw)
+      ? {
+          allowModelOverride: readRecordValue(subagentRaw, "allowModelOverride"),
+          hasAllowedModelsConfig: Array.isArray(subagentAllowedModels),
+          allowedModels: normalizeArrayBackedTrimmedStringList(subagentAllowedModels),
+        }
+      : undefined;
     const normalizedSubagent =
       subagent &&
       (typeof subagent.allowModelOverride === "boolean" ||
@@ -171,23 +244,18 @@ function normalizePluginEntries(
               : {}),
           }
         : undefined;
-    const llmRaw = entry.llm;
-    const llm =
-      llmRaw && typeof llmRaw === "object" && !Array.isArray(llmRaw)
-        ? {
-            allowModelOverride: (llmRaw as { allowModelOverride?: unknown }).allowModelOverride,
-            hasAllowedModelsConfig: Array.isArray(
-              (llmRaw as { allowedModels?: unknown }).allowedModels,
-            ),
-            allowedModels: Array.isArray((llmRaw as { allowedModels?: unknown }).allowedModels)
-              ? normalizeArrayBackedTrimmedStringList(
-                  (llmRaw as { allowedModels?: unknown }).allowedModels,
-                )
-              : undefined,
-            allowAgentIdOverride: (llmRaw as { allowAgentIdOverride?: unknown })
-              .allowAgentIdOverride,
-          }
-        : undefined;
+    const llmRaw = readRecordValue(value, "llm");
+    const llmAllowedModels = isRecord(llmRaw)
+      ? readRecordValue(llmRaw, "allowedModels")
+      : undefined;
+    const llm = isRecord(llmRaw)
+      ? {
+          allowModelOverride: readRecordValue(llmRaw, "allowModelOverride"),
+          hasAllowedModelsConfig: Array.isArray(llmAllowedModels),
+          allowedModels: normalizeArrayBackedTrimmedStringList(llmAllowedModels),
+          allowAgentIdOverride: readRecordValue(llmRaw, "allowAgentIdOverride"),
+        }
+      : undefined;
     const normalizedLlm =
       llm &&
       (typeof llm.allowModelOverride === "boolean" ||
@@ -207,14 +275,16 @@ function normalizePluginEntries(
               : {}),
           }
         : undefined;
+    const enabled = readRecordValue(value, "enabled");
     normalized[normalizedKey] = {
       ...normalized[normalizedKey],
-      enabled:
-        typeof entry.enabled === "boolean" ? entry.enabled : normalized[normalizedKey]?.enabled,
+      enabled: typeof enabled === "boolean" ? enabled : normalized[normalizedKey]?.enabled,
       hooks: normalizedHooks ?? normalized[normalizedKey]?.hooks,
       subagent: normalizedSubagent ?? normalized[normalizedKey]?.subagent,
       llm: normalizedLlm ?? normalized[normalizedKey]?.llm,
-      config: "config" in entry ? entry.config : normalized[normalizedKey]?.config,
+      config: hasRecordKey(value, "config")
+        ? readRecordValue(value, "config")
+        : normalized[normalizedKey]?.config,
     };
   }
   return normalized;
@@ -224,17 +294,19 @@ export function normalizePluginsConfigWithResolver(
   config?: OpenClawConfig["plugins"],
   normalizePluginId: NormalizePluginId = identityNormalizePluginId,
 ): NormalizedPluginsConfig {
-  const memorySlot = normalizeSlotValue(config?.slots?.memory);
+  const slots = readRecordValue(config, "slots");
+  const load = readRecordValue(config, "load");
+  const memorySlot = normalizeSlotValue(readRecordValue(slots, "memory"));
   return {
-    enabled: config?.enabled !== false,
-    allow: normalizeList(config?.allow, normalizePluginId),
-    deny: normalizeList(config?.deny, normalizePluginId),
-    loadPaths: normalizeList(config?.load?.paths, identityNormalizePluginId),
+    enabled: readRecordValue(config, "enabled") !== false,
+    allow: normalizeList(readRecordValue(config, "allow"), normalizePluginId),
+    deny: normalizeList(readRecordValue(config, "deny"), normalizePluginId),
+    loadPaths: normalizeList(readRecordValue(load, "paths"), identityNormalizePluginId),
     slots: {
       memory: memorySlot === undefined ? defaultSlotIdForKey("memory") : memorySlot,
-      contextEngine: normalizeSlotValue(config?.slots?.contextEngine),
+      contextEngine: normalizeSlotValue(readRecordValue(slots, "contextEngine")),
     },
-    entries: normalizePluginEntries(config?.entries, normalizePluginId),
+    entries: normalizePluginEntries(readRecordValue(config, "entries"), normalizePluginId),
   };
 }
 
@@ -242,22 +314,24 @@ export function hasExplicitPluginConfig(plugins?: OpenClawConfig["plugins"]): bo
   if (!plugins) {
     return false;
   }
-  if (typeof plugins.enabled === "boolean") {
+  if (typeof readRecordValue(plugins, "enabled") === "boolean") {
     return true;
   }
-  if (Array.isArray(plugins.allow) && plugins.allow.length > 0) {
+  if ((copyArrayEntries(readRecordValue(plugins, "allow"))?.length ?? 0) > 0) {
     return true;
   }
-  if (Array.isArray(plugins.deny) && plugins.deny.length > 0) {
+  if ((copyArrayEntries(readRecordValue(plugins, "deny"))?.length ?? 0) > 0) {
     return true;
   }
-  if (plugins.load?.paths && Array.isArray(plugins.load.paths) && plugins.load.paths.length > 0) {
+  if (
+    (copyArrayEntries(readRecordValue(readRecordValue(plugins, "load"), "paths"))?.length ?? 0) > 0
+  ) {
     return true;
   }
-  if (plugins.slots && Object.keys(plugins.slots).length > 0) {
+  if (copyRecordEntries(readRecordValue(plugins, "slots")).length > 0) {
     return true;
   }
-  if (plugins.entries && Object.keys(plugins.entries).length > 0) {
+  if (copyRecordEntries(readRecordValue(plugins, "entries")).length > 0) {
     return true;
   }
   return false;
@@ -274,10 +348,9 @@ export function isBundledChannelEnabledByChannelConfig(
   if (!channelId) {
     return false;
   }
-  const channels = cfg.channels as Record<string, unknown> | undefined;
-  const entry = channels?.[channelId];
-  if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+  const entry = readRecordValue(readRecordValue(cfg, "channels"), channelId);
+  if (!isRecord(entry)) {
     return false;
   }
-  return (entry as Record<string, unknown>).enabled === true;
+  return readRecordValue(entry, "enabled") === true;
 }
