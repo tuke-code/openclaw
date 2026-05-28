@@ -1003,7 +1003,8 @@ describe("ensureChannelSetupPluginInstalled", () => {
       onlyPluginIds: ["custom-external-chat-plugin"],
     });
     const manifestCall = loadPluginManifestRegistry.mock.calls
-      .map((call) => requireRecord(call[0], "manifest registry args"))
+      .map((call) => call[0])
+      .filter(isRecord)
       .find((args) =>
         requireArray(args.candidates, "manifest candidates").some((candidate) => {
           const record = requireRecord(candidate, "manifest candidate");
