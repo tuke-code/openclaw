@@ -255,7 +255,14 @@ describe("agents delete command", () => {
         sessions: {},
       });
       gatewayMocks.callGateway.mockRejectedValue(
-        new Error("gateway agents.delete requires credentials before opening a websocket"),
+        Object.assign(
+          new Error("gateway agents.delete requires credentials before opening a websocket"),
+          {
+            configPath: path.join(stateDir, "openclaw.json"),
+            method: "agents.delete",
+            name: "GatewayCredentialsRequiredError",
+          },
+        ),
       );
 
       await agentsDeleteCommand({ id: "ops", force: true, json: true }, runtime);
