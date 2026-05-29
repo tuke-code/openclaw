@@ -26,7 +26,6 @@ import type {
   StreamOptions,
   TextContent,
   ThinkingContent,
-  Tool,
   ToolCall,
   ToolResultMessage,
 } from "../types.js";

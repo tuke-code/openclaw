@@ -19,7 +19,6 @@ import type {
   StreamOptions,
   TextContent,
   ThinkingContent,
-  Tool,
   ToolCall,
 } from "../types.js";
 import { AssistantMessageEventStream } from "../utils/event-stream.js";
