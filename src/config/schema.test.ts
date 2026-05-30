@@ -238,7 +238,7 @@ describe("config schema", () => {
     expect(progressPropsFor("discord")).not.toHaveProperty("nativeTaskCards");
     expect(progressPropsFor("telegram")).not.toHaveProperty("nativeTaskCards");
     expect(progressPropsFor("discord")).toHaveProperty("commentary");
-    expect(progressPropsFor("telegram")).not.toHaveProperty("commentary");
+    expect(progressPropsFor("telegram")).toHaveProperty("commentary");
     expect(res.uiHints["channels.matrix"]?.label).toBe("Matrix");
     expect(res.uiHints["channels.matrix.accessToken"]?.sensitive).toBe(true);
     expect(res.uiHints["channels.matrix.streaming.progress.label"]?.label).toBe(
@@ -252,7 +252,9 @@ describe("config schema", () => {
     expect(res.uiHints["channels.discord.streaming.progress.toolProgress"]?.label).toBe(
       "Discord Progress Tool Lines",
     );
-    expect(res.uiHints["channels.telegram.streaming.progress.commentary"]).toBeUndefined();
+    expect(res.uiHints["channels.telegram.streaming.progress.commentary"]?.label).toBe(
+      "Telegram Progress Commentary",
+    );
     expect(res.uiHints["channels.mattermost.streaming.progress.label"]?.label).toBe(
       "Mattermost Progress Label",
     );
@@ -410,7 +412,7 @@ describe("config schema", () => {
     ).toBe(false);
   });
 
-  it("accepts progress commentary only for Discord streaming config", () => {
+  it("accepts progress commentary for channels that render commentary drafts", () => {
     expect(
       DiscordConfigSchema.safeParse({
         streaming: {
@@ -427,7 +429,7 @@ describe("config schema", () => {
           progress: { commentary: true },
         },
       }).success,
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it("keeps per-agent model overrides limited to model selection", () => {

@@ -318,10 +318,11 @@ curl "https://api.telegram.org/bot<bot_token>/getUpdates"
     - `channels.telegram.streaming` is `off | partial | block | progress` (default: `partial`)
     - `progress` keeps one editable status draft for tool progress, clears it at completion, and sends the final answer as a normal message
     - `streaming.preview.toolProgress` controls whether tool/progress updates reuse the same edited preview message (default: `true` when preview streaming is active)
+    - `streaming.progress.commentary` (default `false`) opts into Codex preamble/commentary text in the temporary progress draft. Commentary is cleaned before display, stays transient, and does not change final answer delivery.
     - `streaming.preview.commandText` controls command/exec detail inside those tool-progress lines: `raw` (default, preserves released behavior) or `status` (tool label only)
     - legacy `channels.telegram.streamMode` and boolean `streaming` values are detected; run `openclaw doctor --fix` to migrate them to `channels.telegram.streaming.mode`
 
-    Tool-progress preview updates are the short status lines shown while tools run, for example command execution, file reads, planning updates, patch summaries, or Codex preamble/commentary text in Codex app-server mode. Telegram keeps these enabled by default to match released OpenClaw behavior from `v2026.4.22` and later.
+    Tool-progress preview updates are the short status lines shown while tools run, for example command execution, file reads, planning updates, and patch summaries. Telegram keeps these enabled by default to match released OpenClaw behavior from `v2026.4.22` and later.
 
     Direct chats can use native Telegram drafts for these tool-progress lines without persisting tool chatter into chat history. Native drafts stop before answer text starts; final answers stay on the normal persistent delivery path. This lane is off by default and should be gated to trusted DM IDs first:
 
