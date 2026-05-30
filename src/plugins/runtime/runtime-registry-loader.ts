@@ -40,6 +40,34 @@ function scopeRank(scope: typeof pluginRegistryLoaded): number {
   throw new Error("Unsupported plugin registry scope");
 }
 
+function normalizeActiveChannelPluginId(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+function readActiveChannelOwnerPluginId(entry: unknown): string | undefined {
+  try {
+    if (!entry || typeof entry !== "object") {
+      return undefined;
+    }
+    const pluginId = normalizeActiveChannelPluginId((entry as { pluginId?: unknown }).pluginId);
+    if (pluginId) {
+      return pluginId;
+    }
+  } catch {
+    return undefined;
+  }
+
+  try {
+    const plugin = (entry as { plugin?: unknown }).plugin;
+    if (!plugin || typeof plugin !== "object") {
+      return undefined;
+    }
+    return normalizeActiveChannelPluginId((plugin as { id?: unknown }).id);
+  } catch {
+    return undefined;
+  }
+}
+
 function activeRegistrySatisfiesScope(
   scope: PluginRegistryScope,
   active: ReturnType<typeof getActivePluginRegistry>,
@@ -57,7 +85,13 @@ function activeRegistrySatisfiesScope(
     }
     return registryContainsRuntimePluginIds(active, requestedPluginIds);
   }
-  const activeChannelPluginIds = new Set(active.channels.map((entry) => entry.plugin.id));
+  const activeChannelPluginIds = new Set<string>();
+  for (const entry of active.channels) {
+    const pluginId = readActiveChannelOwnerPluginId(entry);
+    if (pluginId) {
+      activeChannelPluginIds.add(pluginId);
+    }
+  }
   switch (scope) {
     case "configured-channels":
     case "channels":

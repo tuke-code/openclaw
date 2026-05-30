@@ -312,6 +312,35 @@ describe("ensurePluginRegistryLoaded", () => {
     expect(loadOptions().onlyPluginIds).toEqual([]);
   });
 
+  it("skips unreadable active channel entries while reusing configured-channel registries", () => {
+    mocks.resolveConfiguredChannelPluginIds.mockReturnValue(["mockplugin"]);
+    ensurePluginRegistryLoaded({
+      scope: "configured-channels",
+      config: { channels: { mockplugin: { enabled: true } } } as never,
+    });
+    const activeRegistry = createEmptyPluginRegistry();
+    const unreadableEntry = {};
+    Object.defineProperty(unreadableEntry, "plugin", {
+      get() {
+        throw new Error("fuzzplugin channel plugin failed");
+      },
+    });
+    activeRegistry.channels.push(
+      unreadableEntry as never,
+      { pluginId: "mockplugin", plugin: { id: "mockchannel" } } as never,
+    );
+    mocks.getActivePluginRegistry.mockReturnValue(activeRegistry);
+    mocks.getActivePluginRegistryWorkspaceDir.mockReturnValue("/resolved-workspace");
+    mocks.loadOpenClawPlugins.mockClear();
+
+    ensurePluginRegistryLoaded({
+      scope: "configured-channels",
+      config: { channels: { mockplugin: { enabled: true } } } as never,
+    });
+
+    expect(mocks.loadOpenClawPlugins).not.toHaveBeenCalled();
+  });
+
   it("does not forward empty channel scopes for broad channel loads", () => {
     mocks.resolveChannelPluginIds.mockReturnValue([]);
 
