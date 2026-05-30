@@ -1,9 +1,9 @@
 import { sanitizeForLog } from "../../packages/terminal-core/src/ansi.js";
 import { resolveProviderIdForAuth } from "../agents/provider-auth-aliases.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
+import { isRecord } from "../shared/record-coerce.js";
 import { normalizePluginsConfig, resolveEffectiveEnableState } from "./config-state.js";
 import { loadManifestMetadataSnapshot } from "./manifest-contract-eligibility.js";
-import type { PluginManifestRecord } from "./manifest-registry.js";
 import type { PluginOrigin } from "./plugin-origin.types.js";
 
 export type ProviderAuthChoiceMetadata = {
@@ -36,7 +36,7 @@ export type ProviderOnboardAuthFlag = {
 };
 
 type ProviderAuthChoiceCandidate = ProviderAuthChoiceMetadata & {
-  origin: PluginOrigin;
+  origin?: PluginOrigin;
 };
 type ProviderOnboardAuthFlagCandidate = ProviderAuthChoiceCandidate & {
   optionKey: string;
@@ -73,34 +73,136 @@ function resolveProviderAuthChoiceOriginPriority(origin: PluginOrigin | undefine
   return PROVIDER_AUTH_CHOICE_ORIGIN_PRIORITY[origin] ?? Number.MAX_SAFE_INTEGER;
 }
 
+function isReadableRecord(value: unknown): value is Record<string, unknown> {
+  try {
+    return isRecord(value);
+  } catch {
+    return false;
+  }
+}
+
+function readRecordValue(record: unknown, key: string): unknown {
+  if (!isReadableRecord(record)) {
+    return undefined;
+  }
+  try {
+    return record[key];
+  } catch {
+    return undefined;
+  }
+}
+
+function copyArrayEntries(value: unknown): unknown[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  let length: number;
+  try {
+    length = value.length;
+  } catch {
+    return [];
+  }
+  const entries: unknown[] = [];
+  for (let index = 0; index < length; index += 1) {
+    try {
+      entries.push(value[index]);
+    } catch {
+      continue;
+    }
+  }
+  return entries;
+}
+
+function readStringField(record: unknown, key: string): string | undefined {
+  const value = readRecordValue(record, key);
+  return typeof value === "string" ? value : undefined;
+}
+
+function readNumberField(record: unknown, key: string): number | undefined {
+  const value = readRecordValue(record, key);
+  return typeof value === "number" ? value : undefined;
+}
+
+function readBooleanField(record: unknown, key: string): boolean | undefined {
+  const value = readRecordValue(record, key);
+  return typeof value === "boolean" ? value : undefined;
+}
+
+function readStringArrayField(record: unknown, key: string): string[] | undefined {
+  const values = copyArrayEntries(readRecordValue(record, key)).filter(
+    (entry): entry is string => typeof entry === "string",
+  );
+  return values.length > 0 ? values : undefined;
+}
+
+function readPluginOrigin(record: unknown): PluginOrigin | undefined {
+  const origin = readStringField(record, "origin");
+  return origin === "config" ||
+    origin === "bundled" ||
+    origin === "global" ||
+    origin === "workspace"
+    ? origin
+    : undefined;
+}
+
+function readManifestPluginRecords(registry: unknown): unknown[] {
+  return copyArrayEntries(readRecordValue(registry, "plugins")).filter(isReadableRecord);
+}
+
+function readProviderAuthChoiceRecords(plugin: unknown): unknown[] {
+  return copyArrayEntries(readRecordValue(plugin, "providerAuthChoices")).filter(isReadableRecord);
+}
+
 function toProviderAuthChoiceCandidate(params: {
   pluginId: string;
-  origin: PluginOrigin;
-  choice: NonNullable<PluginManifestRecord["providerAuthChoices"]>[number];
-}): ProviderAuthChoiceCandidate {
+  origin: PluginOrigin | undefined;
+  choice: unknown;
+}): ProviderAuthChoiceCandidate | undefined {
   const { pluginId, origin, choice } = params;
+  const providerId = readStringField(choice, "provider");
+  const methodId = readStringField(choice, "method");
+  const choiceId = readStringField(choice, "choiceId");
+  if (!providerId || !methodId || !choiceId) {
+    return undefined;
+  }
+  const choiceLabel = readStringField(choice, "choiceLabel");
+  const choiceHint = readStringField(choice, "choiceHint");
+  const assistantPriority = readNumberField(choice, "assistantPriority");
+  const assistantVisibility = readStringField(choice, "assistantVisibility");
+  const deprecatedChoiceIds = readStringArrayField(choice, "deprecatedChoiceIds");
+  const groupId = readStringField(choice, "groupId");
+  const groupLabel = readStringField(choice, "groupLabel");
+  const groupHint = readStringField(choice, "groupHint");
+  const optionKey = readStringField(choice, "optionKey");
+  const cliFlag = readStringField(choice, "cliFlag");
+  const cliOption = readStringField(choice, "cliOption");
+  const cliDescription = readStringField(choice, "cliDescription");
+  const onboardingScopes = readStringArrayField(choice, "onboardingScopes")?.filter(
+    (scope): scope is "text-inference" | "image-generation" | "music-generation" =>
+      scope === "text-inference" || scope === "image-generation" || scope === "music-generation",
+  );
   return {
     pluginId,
     origin,
-    providerId: choice.provider,
-    methodId: choice.method,
-    choiceId: choice.choiceId,
-    choiceLabel: choice.choiceLabel ?? choice.choiceId,
-    ...(choice.choiceHint ? { choiceHint: choice.choiceHint } : {}),
-    ...(choice.assistantPriority !== undefined
-      ? { assistantPriority: choice.assistantPriority }
+    providerId,
+    methodId,
+    choiceId,
+    choiceLabel: choiceLabel ?? choiceId,
+    ...(choiceHint ? { choiceHint } : {}),
+    ...(assistantPriority !== undefined ? { assistantPriority } : {}),
+    ...(assistantVisibility === "visible" || assistantVisibility === "manual-only"
+      ? { assistantVisibility }
       : {}),
-    ...(choice.assistantVisibility ? { assistantVisibility: choice.assistantVisibility } : {}),
-    ...(choice.deprecatedChoiceIds ? { deprecatedChoiceIds: choice.deprecatedChoiceIds } : {}),
-    ...(choice.groupId ? { groupId: choice.groupId } : {}),
-    ...(choice.groupLabel ? { groupLabel: choice.groupLabel } : {}),
-    ...(choice.groupHint ? { groupHint: choice.groupHint } : {}),
-    ...(choice.onboardingFeatured ? { onboardingFeatured: true } : {}),
-    ...(choice.optionKey ? { optionKey: choice.optionKey } : {}),
-    ...(choice.cliFlag ? { cliFlag: choice.cliFlag } : {}),
-    ...(choice.cliOption ? { cliOption: choice.cliOption } : {}),
-    ...(choice.cliDescription ? { cliDescription: choice.cliDescription } : {}),
-    ...(choice.onboardingScopes ? { onboardingScopes: choice.onboardingScopes } : {}),
+    ...(deprecatedChoiceIds ? { deprecatedChoiceIds } : {}),
+    ...(groupId ? { groupId } : {}),
+    ...(groupLabel ? { groupLabel } : {}),
+    ...(groupHint ? { groupHint } : {}),
+    ...(readBooleanField(choice, "onboardingFeatured") ? { onboardingFeatured: true } : {}),
+    ...(optionKey ? { optionKey } : {}),
+    ...(cliFlag ? { cliFlag } : {}),
+    ...(cliOption ? { cliOption } : {}),
+    ...(cliDescription ? { cliDescription } : {}),
+    ...(onboardingScopes && onboardingScopes.length > 0 ? { onboardingScopes } : {}),
   };
 }
 
@@ -125,7 +227,8 @@ function normalizeManifestAuthDescriptorId(value: string): string {
 }
 
 function toSetupProviderAuthChoiceCandidate(params: {
-  plugin: PluginManifestRecord;
+  pluginId: string;
+  origin: PluginOrigin | undefined;
   providerId: string;
   methodId: string;
 }): ProviderAuthChoiceCandidate {
@@ -134,8 +237,8 @@ function toSetupProviderAuthChoiceCandidate(params: {
   const choiceLabel =
     params.methodId === "api-key" ? `${providerLabel} API key` : `${providerLabel} ${methodLabel}`;
   return {
-    pluginId: params.plugin.id,
-    origin: params.plugin.origin,
+    pluginId: params.pluginId,
+    origin: params.origin,
     providerId: params.providerId,
     methodId: params.methodId,
     choiceId: `${params.providerId}-${params.methodId}`,
@@ -145,25 +248,41 @@ function toSetupProviderAuthChoiceCandidate(params: {
   };
 }
 
-function listSetupProviderAuthChoiceCandidates(plugin: PluginManifestRecord) {
-  if (plugin.setup?.requiresRuntime !== false && plugin.setupSource) {
+function listSetupProviderAuthChoiceCandidates(params: {
+  plugin: unknown;
+  pluginId: string;
+  origin: PluginOrigin | undefined;
+}) {
+  const setup = readRecordValue(params.plugin, "setup");
+  if (
+    readRecordValue(setup, "requiresRuntime") !== false &&
+    readStringField(params.plugin, "setupSource")
+  ) {
     return [];
   }
   const explicitProviderMethods = new Set(
-    (plugin.providerAuthChoices ?? []).map((choice) => `${choice.provider}::${choice.method}`),
+    readProviderAuthChoiceRecords(params.plugin)
+      .map((choice) => {
+        const provider = readStringField(choice, "provider");
+        const method = readStringField(choice, "method");
+        return provider && method ? `${provider}::${method}` : undefined;
+      })
+      .filter((entry): entry is string => Boolean(entry)),
   );
-  return (plugin.setup?.providers ?? []).flatMap((provider) => {
-    const providerId = normalizeManifestAuthDescriptorId(provider.id);
+  return copyArrayEntries(readRecordValue(setup, "providers")).flatMap((provider) => {
+    const providerId = normalizeManifestAuthDescriptorId(readStringField(provider, "id") ?? "");
     if (!providerId) {
       return [];
     }
-    return (provider.authMethods ?? [])
+    return copyArrayEntries(readRecordValue(provider, "authMethods"))
+      .filter((entry): entry is string => typeof entry === "string")
       .map(normalizeManifestAuthDescriptorId)
       .filter(Boolean)
       .filter((methodId) => !explicitProviderMethods.has(`${providerId}::${methodId}`))
       .map((methodId) =>
         toSetupProviderAuthChoiceCandidate({
-          plugin,
+          pluginId: params.pluginId,
+          origin: params.origin,
           providerId,
           methodId,
         }),
@@ -189,13 +308,21 @@ function resolveManifestProviderAuthChoiceCandidates(params?: {
   });
   const registry = metadataSnapshot.manifestRegistry;
   const normalizedConfig = normalizePluginsConfig(params?.config?.plugins);
-  return registry.plugins.flatMap((plugin) => {
+  return readManifestPluginRecords(registry).flatMap((plugin) => {
+    const pluginId = readStringField(plugin, "id");
+    const origin = readPluginOrigin(plugin);
+    if (!pluginId) {
+      return [];
+    }
+    if (params?.includeUntrustedWorkspacePlugins === false && !origin) {
+      return [];
+    }
     if (
-      plugin.origin === "workspace" &&
+      origin === "workspace" &&
       params?.includeUntrustedWorkspacePlugins === false &&
       !resolveEffectiveEnableState({
-        id: plugin.id,
-        origin: plugin.origin,
+        id: pluginId,
+        origin,
         config: normalizedConfig,
         rootConfig: params?.config,
       }).enabled
@@ -203,16 +330,17 @@ function resolveManifestProviderAuthChoiceCandidates(params?: {
       return [];
     }
     const choices: ProviderAuthChoiceCandidate[] = [];
-    for (const choice of plugin.providerAuthChoices ?? []) {
-      choices.push(
-        toProviderAuthChoiceCandidate({
-          pluginId: plugin.id,
-          origin: plugin.origin,
-          choice,
-        }),
-      );
+    for (const choice of readProviderAuthChoiceRecords(plugin)) {
+      const candidate = toProviderAuthChoiceCandidate({
+        pluginId,
+        origin,
+        choice,
+      });
+      if (candidate) {
+        choices.push(candidate);
+      }
     }
-    choices.push(...listSetupProviderAuthChoiceCandidates(plugin));
+    choices.push(...listSetupProviderAuthChoiceCandidates({ plugin, pluginId, origin }));
     return choices;
   });
 }

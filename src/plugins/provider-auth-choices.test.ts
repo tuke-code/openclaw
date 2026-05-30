@@ -157,6 +157,192 @@ describe("provider auth choice manifest helpers", () => {
     });
   });
 
+  it("skips unreadable manifest auth rows while preserving healthy choices", () => {
+    const unreadablePlugin: Record<string, unknown> = {
+      origin: "workspace",
+      providerAuthChoices: [
+        {
+          provider: "fuzzprovider",
+          method: "api-key",
+          choiceId: "fuzzprovider-api-key",
+        },
+      ],
+    };
+    Object.defineProperty(unreadablePlugin, "id", {
+      get() {
+        throw new Error("fuzzplugin id failed");
+      },
+    });
+    const unreadableChoicesPlugin: Record<string, unknown> = {
+      id: "fuzzplugin",
+      origin: "workspace",
+    };
+    Object.defineProperty(unreadableChoicesPlugin, "providerAuthChoices", {
+      get() {
+        throw new Error("fuzzplugin auth choices failed");
+      },
+    });
+    const unreadableChoice: Record<string, unknown> = {
+      provider: "fuzzprovider",
+      method: "api-key",
+      choiceLabel: "Fuzz Provider API key",
+    };
+    Object.defineProperty(unreadableChoice, "choiceId", {
+      get() {
+        throw new Error("fuzzplugin choice id failed");
+      },
+    });
+    const unreadableSetupPlugin: Record<string, unknown> = {
+      id: "fuzzplugin-setup",
+      origin: "workspace",
+      setup: {
+        requiresRuntime: false,
+      },
+    };
+    Object.defineProperty(unreadableSetupPlugin.setup as Record<string, unknown>, "providers", {
+      get() {
+        throw new Error("fuzzplugin setup providers failed");
+      },
+    });
+    const revokedPlugin = Proxy.revocable(
+      {
+        id: "fuzzplugin-revoked",
+        origin: "workspace",
+        providerAuthChoices: [],
+      },
+      {},
+    );
+    revokedPlugin.revoke();
+
+    setManifestPlugins([
+      unreadablePlugin,
+      unreadableChoicesPlugin,
+      createManifestPlugin("fuzzplugin-choice", [unreadableChoice]),
+      unreadableSetupPlugin,
+      revokedPlugin.proxy as never,
+      createManifestPlugin("mockplugin", [
+        createProviderAuthChoice({
+          provider: "mockprovider",
+          method: "api-key",
+          choiceId: "mockprovider-api-key",
+          choiceLabel: "Mock Provider API key",
+          optionKey: "mockProviderApiKey",
+          cliFlag: "--mock-provider-api-key",
+          cliOption: "--mock-provider-api-key <key>",
+        }),
+      ]),
+    ]);
+
+    expect(resolveManifestProviderAuthChoices()).toEqual([
+      {
+        pluginId: "mockplugin",
+        providerId: "mockprovider",
+        methodId: "api-key",
+        choiceId: "mockprovider-api-key",
+        choiceLabel: "Mock Provider API key",
+        optionKey: "mockProviderApiKey",
+        cliFlag: "--mock-provider-api-key",
+        cliOption: "--mock-provider-api-key <key>",
+      },
+    ]);
+    expect(resolveManifestProviderAuthChoice("mockprovider-api-key")?.pluginId).toBe("mockplugin");
+    expect(resolveManifestProviderOnboardAuthFlags()).toEqual([
+      {
+        optionKey: "mockProviderApiKey",
+        authChoice: "mockprovider-api-key",
+        cliFlag: "--mock-provider-api-key",
+        cliOption: "--mock-provider-api-key <key>",
+        description: "Mock Provider API key",
+      },
+    ]);
+  });
+
+  it("does not trust unknown-origin auth choices when untrusted workspace plugins are excluded", () => {
+    setManifestPlugins([
+      createManifestPlugin("fuzzplugin", [
+        createProviderAuthChoice({
+          provider: "fuzzprovider",
+          method: "api-key",
+          choiceId: "fuzzprovider-api-key",
+          choiceLabel: "Fuzz Provider API key",
+          optionKey: "fuzzProviderApiKey",
+          cliFlag: "--fuzz-provider-api-key",
+          cliOption: "--fuzz-provider-api-key <key>",
+        }),
+      ]),
+      {
+        id: "mockplugin",
+        origin: "bundled",
+        providerAuthChoices: [
+          createProviderAuthChoice({
+            provider: "mockprovider",
+            method: "api-key",
+            choiceId: "mockprovider-api-key",
+            choiceLabel: "Mock Provider API key",
+            optionKey: "mockProviderApiKey",
+            cliFlag: "--mock-provider-api-key",
+            cliOption: "--mock-provider-api-key <key>",
+          }),
+        ],
+      },
+    ]);
+
+    expect(
+      resolveManifestProviderAuthChoices({
+        includeUntrustedWorkspacePlugins: false,
+      }),
+    ).toEqual([
+      {
+        pluginId: "mockplugin",
+        providerId: "mockprovider",
+        methodId: "api-key",
+        choiceId: "mockprovider-api-key",
+        choiceLabel: "Mock Provider API key",
+        optionKey: "mockProviderApiKey",
+        cliFlag: "--mock-provider-api-key",
+        cliOption: "--mock-provider-api-key <key>",
+      },
+    ]);
+  });
+
+  it("keeps explicitly enabled workspace auth choices when untrusted workspace plugins are excluded", () => {
+    setManifestPlugins([
+      {
+        id: "mockplugin",
+        origin: "workspace",
+        providerAuthChoices: [
+          createProviderAuthChoice({
+            provider: "mockprovider",
+            method: "api-key",
+            choiceId: "mockprovider-api-key",
+            choiceLabel: "Mock Provider API key",
+          }),
+        ],
+      },
+    ]);
+
+    expect(
+      resolveManifestProviderAuthChoices({
+        config: {
+          plugins: {
+            entries: {
+              mockplugin: { enabled: true },
+            },
+          },
+        },
+        includeUntrustedWorkspacePlugins: false,
+      }),
+    ).toEqual([
+      {
+        pluginId: "mockplugin",
+        providerId: "mockprovider",
+        methodId: "api-key",
+        choiceId: "mockprovider-api-key",
+        choiceLabel: "Mock Provider API key",
+      },
+    ]);
+  });
+
   it.each([
     {
       name: "deduplicates flag metadata by option key + flag",
