@@ -22,6 +22,106 @@ function isDocumentExtractorPlugin(value: unknown): value is DocumentExtractorPl
   );
 }
 
+function readStringField(value: DocumentExtractorPlugin, field: string): string | undefined {
+  try {
+    const fieldValue = (value as Record<string, unknown>)[field];
+    return typeof fieldValue === "string" ? fieldValue : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function readMimeTypes(value: DocumentExtractorPlugin): string[] | undefined {
+  try {
+    const fieldValue = (value as Record<string, unknown>).mimeTypes;
+    if (
+      !Array.isArray(fieldValue) ||
+      !fieldValue.every((mimeType) => typeof mimeType === "string" && mimeType.trim())
+    ) {
+      return undefined;
+    }
+    return [...fieldValue];
+  } catch {
+    return undefined;
+  }
+}
+
+function readAutoDetectOrder(value: DocumentExtractorPlugin): number | undefined {
+  try {
+    const fieldValue = (value as Record<string, unknown>).autoDetectOrder;
+    return typeof fieldValue === "number" ? fieldValue : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function readExtract(
+  value: DocumentExtractorPlugin,
+): DocumentExtractorPlugin["extract"] | undefined {
+  try {
+    const fieldValue = (value as Record<string, unknown>).extract;
+    return typeof fieldValue === "function"
+      ? (fieldValue as DocumentExtractorPlugin["extract"])
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function copyReadableDocumentExtractorFields(
+  extractor: DocumentExtractorPlugin,
+): Record<string, unknown> {
+  const fields: Record<string, unknown> = {};
+  let descriptors: PropertyDescriptorMap;
+  try {
+    descriptors = Object.getOwnPropertyDescriptors(extractor);
+  } catch {
+    return fields;
+  }
+  for (const [key, descriptor] of Object.entries(descriptors)) {
+    if (
+      !descriptor.enumerable ||
+      key === "id" ||
+      key === "label" ||
+      key === "mimeTypes" ||
+      key === "autoDetectOrder" ||
+      key === "extract" ||
+      key === "pluginId"
+    ) {
+      continue;
+    }
+    try {
+      fields[key] = (extractor as Record<string, unknown>)[key];
+    } catch {
+      // Unreadable plugin-owned optional metadata is treated as absent.
+    }
+  }
+  return fields;
+}
+
+function createDocumentExtractorEntry(params: {
+  extractor: DocumentExtractorPlugin;
+  pluginId: string;
+}): PluginDocumentExtractorEntry | undefined {
+  const id = readStringField(params.extractor, "id");
+  const label = readStringField(params.extractor, "label");
+  const mimeTypes = readMimeTypes(params.extractor);
+  const autoDetectOrder = readAutoDetectOrder(params.extractor);
+  const extract = readExtract(params.extractor);
+  if (id === undefined || label === undefined || mimeTypes === undefined || extract === undefined) {
+    return undefined;
+  }
+  return {
+    ...copyReadableDocumentExtractorFields(params.extractor),
+    id,
+    label,
+    mimeTypes,
+    ...(autoDetectOrder === undefined ? {} : { autoDetectOrder }),
+    extract,
+    pluginId: params.pluginId,
+  } as PluginDocumentExtractorEntry;
+}
+
 function tryLoadBundledPublicArtifactModule(params: {
   dirName: string;
 }): Record<string, unknown> | null {
@@ -44,13 +144,13 @@ function tryLoadBundledPublicArtifactModule(params: {
   return null;
 }
 
-function collectExtractorFactories(mod: Record<string, unknown>): {
-  extractors: DocumentExtractorPlugin[];
+function collectExtractorFactories(params: { mod: Record<string, unknown>; pluginId: string }): {
+  extractors: PluginDocumentExtractorEntry[];
   errors: unknown[];
 } {
-  const extractors: DocumentExtractorPlugin[] = [];
+  const extractors: PluginDocumentExtractorEntry[] = [];
   const errors: unknown[] = [];
-  for (const [name, exported] of Object.entries(mod).toSorted(([left], [right]) =>
+  for (const [name, exported] of Object.entries(params.mod).toSorted(([left], [right]) =>
     left.localeCompare(right),
   )) {
     if (
@@ -68,8 +168,21 @@ function collectExtractorFactories(mod: Record<string, unknown>): {
       errors.push(error);
       continue;
     }
-    if (isDocumentExtractorPlugin(candidate)) {
-      extractors.push(candidate);
+    let extractor: DocumentExtractorPlugin | undefined;
+    try {
+      extractor = isDocumentExtractorPlugin(candidate) ? candidate : undefined;
+    } catch (error) {
+      errors.push(error);
+      continue;
+    }
+    if (extractor) {
+      const entry = createDocumentExtractorEntry({
+        extractor,
+        pluginId: params.pluginId,
+      });
+      if (entry) {
+        extractors.push(entry);
+      }
     }
   }
   return { extractors, errors };
@@ -83,7 +196,10 @@ export function loadBundledDocumentExtractorEntriesFromDir(params: {
   if (!mod) {
     return null;
   }
-  const { extractors, errors } = collectExtractorFactories(mod);
+  const { extractors, errors } = collectExtractorFactories({
+    mod,
+    pluginId: params.pluginId,
+  });
   if (extractors.length === 0) {
     if (errors.length > 0) {
       throw new Error(`Unable to initialize document extractors for plugin ${params.pluginId}`, {
@@ -92,5 +208,5 @@ export function loadBundledDocumentExtractorEntriesFromDir(params: {
     }
     return null;
   }
-  return extractors.map((extractor) => Object.assign({}, extractor, { pluginId: params.pluginId }));
+  return extractors;
 }

@@ -6,26 +6,23 @@ const { publicArtifactModule } = vi.hoisted(() => ({
 
 vi.mock("./public-surface-loader.js", () => ({
   loadBundledPluginPublicArtifactModuleSync: vi.fn(() => publicArtifactModule),
-  resolveBundledPluginPublicArtifactPath: vi.fn(
-    () => "/repo/extensions/fuzzplugin/document-extractor.ts",
-  ),
 }));
 
-import { loadBundledDocumentExtractorEntriesFromDir } from "./document-extractor-public-artifacts.js";
+import { loadBundledWebContentExtractorEntriesFromDir } from "./web-content-extractor-public-artifacts.js";
 
-describe("loadBundledDocumentExtractorEntriesFromDir", () => {
+describe("loadBundledWebContentExtractorEntriesFromDir", () => {
   beforeEach(() => {
     for (const key of Object.keys(publicArtifactModule)) {
       delete publicArtifactModule[key];
     }
   });
 
-  it("skips unreadable bundled document extractors while preserving healthy entries", () => {
+  it("skips unreadable bundled web content extractors while preserving healthy entries", () => {
     const extract = vi.fn();
-    publicArtifactModule.createBrokenDocumentExtractor = () => {
+    publicArtifactModule.createBrokenWebContentExtractor = () => {
       throw new Error("fuzzplugin native probe failed");
     };
-    publicArtifactModule.createFuzzDocumentExtractor = () =>
+    publicArtifactModule.createFuzzWebContentExtractor = () =>
       Object.create(null, {
         id: {
           enumerable: true,
@@ -33,16 +30,14 @@ describe("loadBundledDocumentExtractorEntriesFromDir", () => {
             throw new Error("fuzzplugin extractor id getter failed");
           },
         },
-        label: { enumerable: true, value: "Fuzz Document" },
-        mimeTypes: { enumerable: true, value: ["application/fuzz"] },
+        label: { enumerable: true, value: "Fuzz Web Content" },
         extract: { enumerable: true, value: vi.fn() },
       });
-    publicArtifactModule.createMockDocumentExtractor = () =>
+    publicArtifactModule.createMockWebContentExtractor = () =>
       Object.create(null, {
         id: { enumerable: true, value: "mockplugin" },
-        label: { enumerable: true, value: "Mock Document" },
-        mimeTypes: { enumerable: true, value: ["application/mock"] },
-        autoDetectOrder: { enumerable: true, value: 7 },
+        label: { enumerable: true, value: "Mock Web Content" },
+        autoDetectOrder: { enumerable: true, value: 3 },
         docsUrl: {
           enumerable: true,
           get() {
@@ -53,16 +48,15 @@ describe("loadBundledDocumentExtractorEntriesFromDir", () => {
       });
 
     expect(
-      loadBundledDocumentExtractorEntriesFromDir({
+      loadBundledWebContentExtractorEntriesFromDir({
         dirName: "fuzzplugin",
         pluginId: "fuzzplugin",
       }),
     ).toStrictEqual([
       {
         id: "mockplugin",
-        label: "Mock Document",
-        mimeTypes: ["application/mock"],
-        autoDetectOrder: 7,
+        label: "Mock Web Content",
+        autoDetectOrder: 3,
         extract,
         pluginId: "fuzzplugin",
       },
@@ -70,16 +64,16 @@ describe("loadBundledDocumentExtractorEntriesFromDir", () => {
   });
 
   it("surfaces initialization failure when every matching factory throws", () => {
-    const cause = new Error("native probe failed");
-    publicArtifactModule.createPdfDocumentExtractor = () => {
+    const cause = new Error("fuzzplugin native probe failed");
+    publicArtifactModule.createMockWebContentExtractor = () => {
       throw cause;
     };
 
     expect(() =>
-      loadBundledDocumentExtractorEntriesFromDir({
+      loadBundledWebContentExtractorEntriesFromDir({
         dirName: "fuzzplugin",
         pluginId: "fuzzplugin",
       }),
-    ).toThrow("Unable to initialize document extractors for plugin fuzzplugin");
+    ).toThrow("Unable to initialize web content extractors for plugin fuzzplugin");
   });
 });

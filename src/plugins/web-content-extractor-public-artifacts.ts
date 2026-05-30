@@ -20,6 +20,88 @@ function isWebContentExtractorPlugin(value: unknown): value is WebContentExtract
   );
 }
 
+function readStringField(value: WebContentExtractorPlugin, field: string): string | undefined {
+  try {
+    const fieldValue = (value as Record<string, unknown>)[field];
+    return typeof fieldValue === "string" ? fieldValue : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function readAutoDetectOrder(value: WebContentExtractorPlugin): number | undefined {
+  try {
+    const fieldValue = (value as Record<string, unknown>).autoDetectOrder;
+    return typeof fieldValue === "number" ? fieldValue : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function readExtract(
+  value: WebContentExtractorPlugin,
+): WebContentExtractorPlugin["extract"] | undefined {
+  try {
+    const fieldValue = (value as Record<string, unknown>).extract;
+    return typeof fieldValue === "function"
+      ? (fieldValue as WebContentExtractorPlugin["extract"])
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function copyReadableWebContentExtractorFields(
+  extractor: WebContentExtractorPlugin,
+): Record<string, unknown> {
+  const fields: Record<string, unknown> = {};
+  let descriptors: PropertyDescriptorMap;
+  try {
+    descriptors = Object.getOwnPropertyDescriptors(extractor);
+  } catch {
+    return fields;
+  }
+  for (const [key, descriptor] of Object.entries(descriptors)) {
+    if (
+      !descriptor.enumerable ||
+      key === "id" ||
+      key === "label" ||
+      key === "autoDetectOrder" ||
+      key === "extract" ||
+      key === "pluginId"
+    ) {
+      continue;
+    }
+    try {
+      fields[key] = (extractor as Record<string, unknown>)[key];
+    } catch {
+      // Unreadable plugin-owned optional metadata is treated as absent.
+    }
+  }
+  return fields;
+}
+
+function createWebContentExtractorEntry(params: {
+  extractor: WebContentExtractorPlugin;
+  pluginId: string;
+}): PluginWebContentExtractorEntry | undefined {
+  const id = readStringField(params.extractor, "id");
+  const label = readStringField(params.extractor, "label");
+  const autoDetectOrder = readAutoDetectOrder(params.extractor);
+  const extract = readExtract(params.extractor);
+  if (id === undefined || label === undefined || extract === undefined) {
+    return undefined;
+  }
+  return {
+    ...copyReadableWebContentExtractorFields(params.extractor),
+    id,
+    label,
+    ...(autoDetectOrder === undefined ? {} : { autoDetectOrder }),
+    extract,
+    pluginId: params.pluginId,
+  } as PluginWebContentExtractorEntry;
+}
+
 function tryLoadBundledPublicArtifactModule(params: {
   dirName: string;
 }): Record<string, unknown> | null {
@@ -42,9 +124,13 @@ function tryLoadBundledPublicArtifactModule(params: {
   return null;
 }
 
-function collectExtractorFactories(mod: Record<string, unknown>): WebContentExtractorPlugin[] {
-  const extractors: WebContentExtractorPlugin[] = [];
-  for (const [name, exported] of Object.entries(mod).toSorted(([left], [right]) =>
+function collectExtractorFactories(params: { mod: Record<string, unknown>; pluginId: string }): {
+  extractors: PluginWebContentExtractorEntry[];
+  errors: unknown[];
+} {
+  const extractors: PluginWebContentExtractorEntry[] = [];
+  const errors: unknown[] = [];
+  for (const [name, exported] of Object.entries(params.mod).toSorted(([left], [right]) =>
     left.localeCompare(right),
   )) {
     if (
@@ -55,12 +141,31 @@ function collectExtractorFactories(mod: Record<string, unknown>): WebContentExtr
     ) {
       continue;
     }
-    const candidate = exported();
-    if (isWebContentExtractorPlugin(candidate)) {
-      extractors.push(candidate);
+    let candidate: unknown;
+    try {
+      candidate = exported();
+    } catch (error) {
+      errors.push(error);
+      continue;
+    }
+    let extractor: WebContentExtractorPlugin | undefined;
+    try {
+      extractor = isWebContentExtractorPlugin(candidate) ? candidate : undefined;
+    } catch (error) {
+      errors.push(error);
+      continue;
+    }
+    if (extractor) {
+      const entry = createWebContentExtractorEntry({
+        extractor,
+        pluginId: params.pluginId,
+      });
+      if (entry) {
+        extractors.push(entry);
+      }
     }
   }
-  return extractors;
+  return { extractors, errors };
 }
 
 export function loadBundledWebContentExtractorEntriesFromDir(params: {
@@ -71,9 +176,17 @@ export function loadBundledWebContentExtractorEntriesFromDir(params: {
   if (!mod) {
     return null;
   }
-  const extractors = collectExtractorFactories(mod);
+  const { extractors, errors } = collectExtractorFactories({
+    mod,
+    pluginId: params.pluginId,
+  });
   if (extractors.length === 0) {
+    if (errors.length > 0) {
+      throw new Error(`Unable to initialize web content extractors for plugin ${params.pluginId}`, {
+        cause: errors.length === 1 ? errors[0] : new AggregateError(errors),
+      });
+    }
     return null;
   }
-  return extractors.map((extractor) => Object.assign({}, extractor, { pluginId: params.pluginId }));
+  return extractors;
 }
