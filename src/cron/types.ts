@@ -4,6 +4,7 @@ import type { ChannelId } from "../channels/plugins/types.public.js";
 import type { HookExternalContentSource } from "../security/external-content.js";
 import type { CronJobBase } from "./types-shared.js";
 
+/** Supported schedule forms persisted in cron job specs. */
 export type CronSchedule =
   | { kind: "at"; at: string }
   | { kind: "every"; everyMs: number; anchorMs?: number }
@@ -15,13 +16,18 @@ export type CronSchedule =
       staggerMs?: number;
     };
 
+/** Runtime target that decides whether a job joins main, isolated, or a named session. */
 export type CronSessionTarget = "main" | "isolated" | "current" | `session:${string}`;
+
+/** Wake policy for main-session jobs waiting on heartbeat/user activity. */
 export type CronWakeMode = "next-heartbeat" | "now";
 
 export type CronMessageChannel = ChannelId;
 
+/** Delivery mode for job completion output. */
 export type CronDeliveryMode = "none" | "announce" | "webhook";
 
+/** Completion delivery configuration for cron job output. */
 export type CronDelivery = {
   mode: CronDeliveryMode;
   channel?: CronMessageChannel;
@@ -42,6 +48,7 @@ export type CronCompletionDestination = {
   to?: string;
 };
 
+/** Destination override for failed-run notifications. */
 export type CronFailureDestination = {
   channel?: CronMessageChannel;
   to?: string;
@@ -53,7 +60,10 @@ export type CronDeliveryPatch = Partial<Omit<CronDelivery, "completionDestinatio
   completionDestination?: CronCompletionDestination | null;
 };
 
+/** Execution outcome, separate from delivery outcome. */
 export type CronRunStatus = "ok" | "error" | "skipped";
+
+/** Delivery outcome for completion or failure-notification sends. */
 export type CronDeliveryStatus = "delivered" | "not-delivered" | "unknown" | "not-requested";
 
 export type CronDeliveryTraceTarget = {
@@ -79,6 +89,7 @@ export type CronDeliveryTrace = {
   delivered?: boolean;
 };
 
+/** Last failed-run notification delivery state stored on job state and run logs. */
 export type CronFailureNotificationDelivery = {
   /** Whether the last failed run's failure notification reached the target channel. */
   delivered?: boolean;
@@ -144,6 +155,7 @@ export type CronRunOutcome = {
 
 export type CronAgentExecutionPhase = EmbeddedAgentExecutionPhase;
 
+/** Watchdog-visible execution metadata for an in-flight cron agent run. */
 export type CronAgentExecutionStarted = {
   jobId: string;
   agentId?: string;
@@ -178,6 +190,7 @@ export type CronFailureAlert = {
   accountId?: string;
 };
 
+/** Payload variants cron can execute in main-session or isolated-agent modes. */
 export type CronPayload = { kind: "systemEvent"; text: string } | CronAgentTurnPayload;
 
 export type CronPayloadPatch = { kind: "systemEvent"; text?: string } | CronAgentTurnPayloadPatch;
@@ -208,6 +221,7 @@ type CronAgentTurnPayloadPatch = {
 } & Partial<Omit<CronAgentTurnPayloadFields, "toolsAllow">> & {
     toolsAllow?: string[] | null;
   };
+/** Mutable runtime state persisted beside the immutable cron job spec. */
 export type CronJobState = {
   nextRunAtMs?: number;
   runningAtMs?: number;
@@ -244,6 +258,7 @@ export type CronJobState = {
   lastFailureNotificationDeliveryError?: string;
 };
 
+/** Fully persisted cron job with spec fields and mutable run state. */
 export type CronJob = CronJobBase<
   CronSchedule,
   CronSessionTarget,
@@ -255,15 +270,18 @@ export type CronJob = CronJobBase<
   state: CronJobState;
 };
 
+/** Versioned cron store file shape. */
 export type CronStoreFile = {
   version: 1;
   jobs: CronJob[];
 };
 
+/** Create input accepted by cron APIs before id/timestamps/state are assigned. */
 export type CronJobCreate = Omit<CronJob, "id" | "createdAtMs" | "updatedAtMs" | "state"> & {
   state?: Partial<CronJobState>;
 };
 
+/** Patch input accepted by cron APIs without allowing immutable identity fields. */
 export type CronJobPatch = Partial<
   Omit<CronJob, "id" | "createdAtMs" | "state" | "payload" | "delivery">
 > & {
