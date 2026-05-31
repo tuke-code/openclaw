@@ -90,6 +90,8 @@ export async function buildStatusAllReportLines(params: {
         warn,
         muted,
         accentDim: theme.accentDim,
+        // Issue details can include plugin-provided prose; cap them before
+        // table wrapping so the channel overview remains scannable.
         formatIssueMessage: (message) => message.slice(0, 90),
       }),
       ...buildStatusChannelDetailsSections({

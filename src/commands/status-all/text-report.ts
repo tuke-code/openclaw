@@ -114,6 +114,8 @@ export function appendStatusReportSections(params: {
       rows: section.rows,
     });
     if (section.trailer) {
+      // Table trailers belong directly under their table, before the next
+      // section heading inserts a separator.
       params.lines.push(section.trailer);
     }
   }
