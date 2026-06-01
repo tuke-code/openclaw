@@ -51,6 +51,8 @@ function messageForReason(params: {
 }
 
 export function resolveOpenAiCompatError(err: unknown): OpenAiCompatError | undefined {
+  // Only dependency-classified failover errors become OpenAI-compatible
+  // payloads; unknown local failures stay with endpoint-specific 500 handling.
   const described = describeFailoverError(err);
   const reason = described.reason;
   if (!reason) {
@@ -83,6 +85,8 @@ export function validateOpenAiSamplingParams(params: {
   presencePenalty?: unknown;
   seed?: unknown;
 }): string | undefined {
+  // Keep validation at the HTTP compatibility boundary so provider runtimes see
+  // OpenAI-shaped sampling values only after range/type checks have passed.
   if (params.temperature != null) {
     if (typeof params.temperature !== "number" || !Number.isFinite(params.temperature)) {
       return "`temperature` must be a finite number.";
