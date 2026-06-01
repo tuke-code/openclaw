@@ -235,9 +235,13 @@ export type {
   PluginTrustedToolPolicyRegistration,
 } from "./host-hooks.js";
 
+/** Loose CLI/onboarding option bag passed through to provider auth flows. */
 export type ProviderAuthOptionBag = {
+  /** Preseeded token value from a provider-specific or generic flag. */
   token?: string;
+  /** Provider or storage hint associated with `token`. */
   tokenProvider?: string;
+  /** Requested persistence mode for newly entered secrets. */
   secretInputMode?: SecretInputMode;
   [key: string]: unknown;
 };
@@ -279,6 +283,7 @@ export type {
 } from "./web-provider-types.js";
 export type { ProviderRuntimeModel } from "./provider-runtime-model.types.js";
 
+/** Lightweight validation result used when a plugin does not provide a parser. */
 export type PluginConfigValidation =
   | { ok: true; value?: unknown }
   | { ok: false; errors: string[] };
@@ -368,14 +373,17 @@ export type ProviderAuthContext = {
   };
 };
 
+/** Resolved API key for non-interactive provider setup, with provenance for storage policy. */
 export type ProviderNonInteractiveApiKeyResult = {
   key: string;
   source: "profile" | "env" | "flag";
   envVarName?: string;
 };
 
+/** Inputs for provider auth methods that can source API keys without prompting. */
 export type ProviderResolveNonInteractiveApiKeyParams = {
   provider: string;
+  /** Explicit flag value; takes precedence over env/profile lookup. */
   flagValue?: string;
   flagName: `--${string}`;
   envVar: string;
@@ -384,6 +392,7 @@ export type ProviderResolveNonInteractiveApiKeyParams = {
   required?: boolean;
 };
 
+/** Builds an auth-profile credential from a resolved non-interactive API key. */
 export type ProviderNonInteractiveApiKeyCredentialParams = {
   provider: string;
   resolved: ProviderNonInteractiveApiKeyResult;
@@ -391,6 +400,7 @@ export type ProviderNonInteractiveApiKeyCredentialParams = {
   metadata?: Record<string, string>;
 };
 
+/** Context passed to provider auth methods that support no-prompt setup. */
 export type ProviderAuthMethodNonInteractiveContext = {
   authChoice: string;
   config: OpenClawConfig;
