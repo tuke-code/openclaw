@@ -1,8 +1,29 @@
-import type { FeedEntryResult, FeedEntryType } from "../../extensions/feeds/api.js";
 import { readConfigFileSnapshot } from "../config/config.js";
 import { isRecord } from "../shared/record-coerce.js";
 import { normalizeOptionalString } from "../shared/string-coerce.js";
 import { theme } from "../terminal/theme.js";
+
+type FeedEntryType = "skill" | "plugin";
+
+type FeedEntryResult = {
+  readonly type: FeedEntryType;
+  readonly id: string;
+  readonly sourceId: string;
+  readonly feedId: string;
+  readonly name?: string;
+  readonly description?: string;
+  readonly version?: string;
+  readonly install?: unknown;
+};
+
+type FeedSearchApi = {
+  readonly searchConfiguredFeedEntries: (options: {
+    readonly query?: string;
+    readonly type?: FeedEntryType;
+    readonly sourceIds?: readonly string[];
+    readonly limit?: number;
+  }) => Promise<readonly FeedEntryResult[]>;
+};
 
 export type CatalogFeedSearchCliOptions = {
   catalogFeeds?: boolean;
@@ -54,7 +75,12 @@ export async function searchCatalogFeedEntriesForCli(params: {
   if (!searchOptions.enabled) {
     return [];
   }
-  const { searchConfiguredFeedEntries } = await import("../../extensions/feeds/api.js");
+  const { loadBundledPluginPublicArtifactModuleSync } =
+    await import("../plugins/public-surface-loader.js");
+  const { searchConfiguredFeedEntries } = loadBundledPluginPublicArtifactModuleSync<FeedSearchApi>({
+    dirName: "feeds",
+    artifactBasename: "api.js",
+  });
   return searchConfiguredFeedEntries({
     query: normalizeOptionalString(
       Array.isArray(params.queryParts) ? params.queryParts.join(" ") : params.queryParts,
