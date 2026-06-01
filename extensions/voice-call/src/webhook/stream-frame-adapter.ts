@@ -1,3 +1,4 @@
+/** Normalized provider websocket frame consumed by the realtime voice handler. */
 export type StreamFrame =
   | { kind: "start"; streamId: string; providerCallId: string }
   | {
@@ -11,6 +12,7 @@ export type StreamFrame =
   | { kind: "error"; code?: string; title?: string; detail?: string }
   | { kind: "ignored" };
 
+/** Translates provider websocket envelopes into normalized frames and outbound media controls. */
 export interface StreamFrameAdapter {
   readonly providerName: "twilio" | "telnyx";
   parseInbound(rawMessage: string): StreamFrame;
@@ -24,6 +26,7 @@ function parseTimestampMs(value: unknown): number | undefined {
     return value;
   }
   if (typeof value === "string" && /^[+-]?\d+$/.test(value.trim())) {
+    // Providers may send timestamps as strings; reject partial tokens like "20ms".
     const parsed = Number(value.trim());
     return Number.isSafeInteger(parsed) ? parsed : undefined;
   }
@@ -37,6 +40,7 @@ function tryParseJson(rawMessage: string): Record<string, unknown> | null {
       return parsed as Record<string, unknown>;
     }
   } catch {
+    // Malformed websocket frames are treated as ignored provider noise.
     /* fall through */
   }
   return null;
@@ -58,6 +62,7 @@ function normalizeBase64ForCompare(value: string): string {
 
 function isValidBase64Payload(value: string): boolean {
   const buffer = Buffer.from(value, "base64");
+  // Node's base64 decoder is permissive; round-trip to reject malformed media payloads.
   return normalizeBase64ForCompare(buffer.toString("base64")) === normalizeBase64ForCompare(value);
 }
 
@@ -145,10 +150,12 @@ function serializeMarkFrame(name: string, streamSid?: string): string {
   });
 }
 
+/** Twilio media adapter; outbound control frames reuse the streamSid learned from start. */
 export class TwilioStreamFrameAdapter implements StreamFrameAdapter {
   readonly providerName = "twilio" as const;
   private streamSid = "";
 
+  /** Captures Twilio's streamSid from the start frame for later outbound control frames. */
   parseInbound(rawMessage: string): StreamFrame {
     return parseProviderInboundFrame(rawMessage, (msg) => {
       const startData = readRecordField(msg, "start");
@@ -175,9 +182,11 @@ export class TwilioStreamFrameAdapter implements StreamFrameAdapter {
   }
 }
 
+/** Telnyx media adapter; outbound control frames intentionally omit Twilio-style streamSid. */
 export class TelnyxStreamFrameAdapter implements StreamFrameAdapter {
   readonly providerName = "telnyx" as const;
 
+  /** Parses Telnyx's split stream_id/call_control_id start shape plus provider error frames. */
   parseInbound(rawMessage: string): StreamFrame {
     return parseProviderInboundFrame(
       rawMessage,
