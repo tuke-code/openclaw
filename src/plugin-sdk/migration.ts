@@ -168,12 +168,14 @@ export function hasMigrationConfigPatchConflict(
   value: unknown,
 ): boolean {
   if (!isRecord(value)) {
+    // Scalar/array patches replace the whole leaf, so any existing value needs overwrite intent.
     return readMigrationConfigPath(config as Record<string, unknown>, path) !== undefined;
   }
   const existing = readMigrationConfigPath(config as Record<string, unknown>, path);
   if (!isRecord(existing)) {
     return false;
   }
+  // Record patches merge one level down; only keys that would overwrite existing leaves conflict.
   return Object.keys(value).some((key) => existing[key] !== undefined);
 }
 
@@ -275,7 +277,7 @@ export async function applyMigrationConfigPatchItem(
       base: "runtime",
       afterWrite: { mode: "auto" },
       mutate(draft) {
-        // Recheck inside mutate because current config may have changed between preview and write.
+        // Recheck inside mutate so queued config writes cannot slip in between preview and disk write.
         if (!ctx.overwrite && hasMigrationConfigPatchConflict(draft, details.path, details.value)) {
           throw new MigrationConfigPatchConflictError(MIGRATION_REASON_TARGET_EXISTS);
         }
@@ -300,6 +302,7 @@ function isSecretReferenceLike(value: unknown): boolean {
   if (!isRecord(value)) {
     return false;
   }
+  // Secret refs contain handles, not secret material; redacting them would hide the migration target.
   return (
     value.source === "env" &&
     typeof value.id === "string" &&
@@ -326,6 +329,7 @@ function redactMigrationValueInternal(value: unknown, seen: WeakSet<object>): un
     return value;
   }
   if (seen.has(value)) {
+    // Cycles cannot be represented in JSON migration output, so redact instead of recursing forever.
     return REDACTED_MIGRATION_VALUE;
   }
   seen.add(value);
