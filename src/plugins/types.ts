@@ -2792,14 +2792,23 @@ export type OpenClawPluginLifecycleApi = {
 
 /** Main registration API injected into native plugin entry files. */
 export type OpenClawPluginApi = {
+  /** Stable plugin id resolved from manifest/registry metadata. */
   id: string;
+  /** Human-readable plugin name. */
   name: string;
+  /** Plugin package/runtime version when known. */
   version?: string;
+  /** Human-readable plugin description when known. */
   description?: string;
+  /** Registry source for diagnostics, status, and policy decisions. */
   source: string;
+  /** Plugin root directory for resolving plugin-owned assets. */
   rootDir?: string;
+  /** Current registration pass; plugins must avoid side effects outside live modes. */
   registrationMode: PluginRegistrationMode;
+  /** Current OpenClaw config snapshot. */
   config: OpenClawConfig;
+  /** Plugin-owned config block after schema/default handling. */
   pluginConfig?: Record<string, unknown>;
   /**
    * In-process runtime helpers for trusted native plugins.
@@ -2820,15 +2829,18 @@ export type OpenClawPluginApi = {
   runContext: OpenClawPluginRunContextApi;
   /** Grouped facade for plugin-owned lifecycle cleanup hooks. */
   lifecycle: OpenClawPluginLifecycleApi;
+  /** Register an agent tool or lazy tool factory owned by this plugin. */
   registerTool: (
     tool: AnyAgentTool | OpenClawPluginToolFactory,
     opts?: OpenClawPluginToolOptions,
   ) => void;
+  /** Register a plugin hook handler for one or more internal hook events. */
   registerHook: (
     events: string | string[],
     handler: InternalHookHandler,
     opts?: OpenClawPluginHookOptions,
   ) => void;
+  /** Register a gateway HTTP/WebSocket route owned by this plugin. */
   registerHttpRoute: (params: OpenClawPluginHttpRouteParams) => void;
   /** Register a plugin-owned resolver for browser-style hosted media URLs. */
   registerHostedMediaResolver: (resolver: OpenClawPluginHostedMediaResolver) => void;
@@ -2846,6 +2858,7 @@ export type OpenClawPluginApi = {
     handler: GatewayRequestHandler,
     opts?: { scope?: OperatorScope },
   ) => void;
+  /** Register plugin-owned CLI commands, optionally lazily through descriptors. */
   registerCli: (
     registrar: OpenClawPluginCliRegistrar,
     opts?: {
@@ -2923,7 +2936,9 @@ export type OpenClawPluginApi = {
   registerWebFetchProvider: (provider: WebFetchProviderPlugin) => void;
   /** Register a web search provider (web search capability). */
   registerWebSearchProvider: (provider: WebSearchProviderPlugin) => void;
+  /** Register a channel-specific interactive callback handler. */
   registerInteractiveHandler: (registration: PluginInteractiveHandlerRegistration) => void;
+  /** Observe host-resolved conversation bindings for channel/session integrations. */
   onConversationBindingResolved: (
     handler: (event: PluginConversationBindingResolvedEvent) => void | Promise<void>,
   ) => void;
@@ -3105,6 +3120,7 @@ export type OpenClawPluginApi = {
   registerMemoryEmbeddingProvider: (
     adapter: import("./memory-embedding-providers.js").MemoryEmbeddingProviderAdapter,
   ) => void;
+  /** Resolve a plugin-relative path through the host path policy. */
   resolvePath: (input: string) => string;
   /** Register a lifecycle hook handler */
   on: <K extends PluginHookName>(
