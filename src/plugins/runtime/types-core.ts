@@ -115,21 +115,32 @@ export type LlmCompleteCaller = {
 };
 
 export type LlmCompleteUsage = {
+  /** Provider-reported prompt/input tokens, when available. */
   inputTokens?: number;
+  /** Provider-reported completion/output tokens, when available. */
   outputTokens?: number;
+  /** Prompt-cache read tokens, when the provider reports them. */
   cacheReadTokens?: number;
+  /** Prompt-cache write tokens, when the provider reports them. */
   cacheWriteTokens?: number;
+  /** Total billable/provider tokens, when available. */
   totalTokens?: number;
+  /** Estimated request cost in USD, when pricing metadata is available. */
   costUsd?: number;
 };
 
 export type LlmCompleteParams = {
+  /** Conversation messages sent to the completion model. */
   messages: LlmCompleteMessage[];
   /** Model ref (e.g. "anthropic/claude-sonnet-4-6"); defaults to the target agent's configured model. */
   model?: string;
+  /** Maximum output token budget for the completion. */
   maxTokens?: number;
+  /** Sampling temperature passed through to the provider when supported. */
   temperature?: number;
+  /** Additional system prompt prepended by the runtime completion helper. */
   systemPrompt?: string;
+  /** Abort signal for cancelling the completion request. */
   signal?: AbortSignal;
   /** Human-readable reason for audit/debug output. */
   purpose?: string;
@@ -138,14 +149,22 @@ export type LlmCompleteParams = {
 };
 
 export type LlmCompleteResult = {
+  /** Text content returned by the completion model. */
   text: string;
+  /** Provider selected for the completion. */
   provider: string;
+  /** Model id selected after defaults and overrides resolve. */
   model: string;
+  /** Agent id whose model/auth context was used. */
   agentId: string;
+  /** Token and cost accounting normalized from provider usage metadata. */
   usage: LlmCompleteUsage;
   audit: {
+    /** Caller identity recorded for logs and guardrails. */
     caller: LlmCompleteCaller;
+    /** Purpose supplied by the caller, if any. */
     purpose?: string;
+    /** Active session key when completion was session-bound. */
     sessionKey?: string;
   };
 };
