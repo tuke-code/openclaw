@@ -11,6 +11,7 @@ import {
   normalizeMessageChannel,
 } from "../utils/message-channel.js";
 
+/** Native approval availability for the channel that initiated an approval request. */
 export type ExecApprovalInitiatingSurfaceState =
   | { kind: "enabled"; channel: string | undefined; channelLabel: string; accountId?: string }
   | { kind: "disabled"; channel: string; channelLabel: string; accountId?: string }
@@ -39,6 +40,7 @@ function hasNativeExecApprovalCapability(channel?: string): boolean {
   return Boolean(capability.getExecInitiatingSurfaceState || capability.getActionAvailabilityState);
 }
 
+/** Resolves whether the initiating surface can collect a native exec approval. */
 export function resolveExecApprovalInitiatingSurfaceState(params: {
   channel?: string | null;
   accountId?: string | null;
