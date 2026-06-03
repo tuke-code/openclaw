@@ -75,13 +75,26 @@ $pidPath = "$base.pid"`;
   const payload = `$ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $false
 ${pathsScript}
+function Append-OpenClawBackgroundLog {
+  param([object]$Value)
+  $text = $Value | Out-String
+  for ($attempt = 1; $attempt -le 20; $attempt++) {
+    try {
+      [System.IO.File]::AppendAllText($logPath, $text, [System.Text.Encoding]::UTF8)
+      return
+    } catch [System.IO.IOException] {
+      if ($attempt -eq 20) { throw }
+      Start-Sleep -Milliseconds 100
+    }
+  }
+}
 try {
   & {
 ${options.script}
-  } *>&1 | ForEach-Object { $_ | Out-String | Add-Content -Path $logPath -Encoding UTF8 }
+  } *>&1 | ForEach-Object { Append-OpenClawBackgroundLog $_ }
   Set-Content -Path $exitPath -Value '0' -Encoding UTF8
 } catch {
-  $_ | Out-String | Add-Content -Path $logPath -Encoding UTF8
+  Append-OpenClawBackgroundLog $_
   Set-Content -Path $exitPath -Value '1' -Encoding UTF8
 } finally {
   Set-Content -Path $donePath -Value 'done' -Encoding UTF8
