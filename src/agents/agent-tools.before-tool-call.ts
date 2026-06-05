@@ -279,6 +279,17 @@ function unwrapErrorCause(err: unknown): unknown {
   return err;
 }
 
+function formatBeforeToolCallError(error: unknown): string {
+  try {
+    if (error instanceof Error) {
+      return error.message || error.name || "Unknown before_tool_call error";
+    }
+    return String(error);
+  } catch {
+    return "Unknown before_tool_call error";
+  }
+}
+
 type ToolDiagnosticIdentity = {
   toolSource: DiagnosticToolSource;
   toolOwner?: string;
@@ -560,10 +571,10 @@ function notifyPluginApprovalResolution(
   }
   try {
     void Promise.resolve(onResolution(resolution)).catch((err: unknown) => {
-      log.warn(`plugin onResolution callback failed: ${String(err)}`);
+      log.warn(`plugin onResolution callback failed: ${formatBeforeToolCallError(err)}`);
     });
   } catch (err) {
-    log.warn(`plugin onResolution callback failed: ${String(err)}`);
+    log.warn(`plugin onResolution callback failed: ${formatBeforeToolCallError(err)}`);
   }
 }
 
@@ -709,7 +720,7 @@ async function requestPluginToolApproval(params: {
   } catch (err) {
     notifyPluginApprovalResolution(approval, PluginApprovalResolutions.CANCELLED);
     if (isAbortSignalCancellation(err, params.signal)) {
-      log.warn(`plugin approval wait cancelled by run abort: ${String(err)}`);
+      log.warn(`plugin approval wait cancelled by run abort: ${formatBeforeToolCallError(err)}`);
       return {
         blocked: true,
         kind: "failure",
@@ -718,7 +729,9 @@ async function requestPluginToolApproval(params: {
         params: params.baseParams,
       };
     }
-    log.warn(`plugin approval gateway request failed; blocking tool call: ${String(err)}`);
+    log.warn(
+      `plugin approval gateway request failed; blocking tool call: ${formatBeforeToolCallError(err)}`,
+    );
     return {
       blocked: true,
       kind: "failure",
@@ -919,7 +932,9 @@ async function recordLoopOutcome(args: {
       };
     }
   } catch (err) {
-    log.warn(`tool loop outcome tracking failed: tool=${args.toolName} error=${String(err)}`);
+    log.warn(
+      `tool loop outcome tracking failed: tool=${args.toolName} error=${formatBeforeToolCallError(err)}`,
+    );
   }
   if (recordedOutcome) {
     args.ctx.onToolOutcome?.(recordedOutcome);
@@ -1230,7 +1245,9 @@ export async function runBeforeToolCallHook(args: {
   } catch (err) {
     const toolCallId = args.toolCallId ? ` toolCallId=${args.toolCallId}` : "";
     const cause = unwrapErrorCause(err);
-    log.error(`before_tool_call hook failed: tool=${toolName}${toolCallId} error=${String(cause)}`);
+    log.error(
+      `before_tool_call hook failed: tool=${toolName}${toolCallId} error=${formatBeforeToolCallError(cause)}`,
+    );
     return {
       blocked: true,
       kind: "failure",

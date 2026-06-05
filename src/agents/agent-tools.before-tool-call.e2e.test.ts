@@ -1019,7 +1019,12 @@ describe("before_tool_call requireApproval handling", () => {
   });
 
   it("blocks when before_tool_call hook execution throws", async () => {
-    hookRunner.runBeforeToolCall.mockRejectedValueOnce(new Error("hook crashed"));
+    const hostileError = {
+      toString() {
+        throw new Error("stringification denied");
+      },
+    };
+    hookRunner.runBeforeToolCall.mockRejectedValueOnce(hostileError);
 
     const result = await runBeforeToolCallHook({
       toolName: "bash",
