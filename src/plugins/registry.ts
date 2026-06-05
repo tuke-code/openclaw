@@ -1947,6 +1947,42 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
     return true;
   };
 
+  const readSessionActionRegistrationFields = (
+    record: PluginRecord,
+    action: PluginSessionActionRegistration,
+  ):
+    | {
+        id: unknown;
+        description: unknown;
+        requiredScopes: unknown;
+        schema: unknown;
+        handler: unknown;
+      }
+    | undefined => {
+    let id: unknown;
+    try {
+      id = action.id;
+      return {
+        id,
+        description: action.description,
+        requiredScopes: action.requiredScopes,
+        schema: action.schema,
+        handler: action.handler,
+      };
+    } catch (error) {
+      const normalizedId = normalizeOptionalHostHookString(id);
+      pushDiagnostic({
+        level: "error",
+        pluginId: record.id,
+        source: record.source,
+        message:
+          `session action registration has unreadable fields` +
+          `${normalizedId ? `: ${normalizedId}` : ""}: ${formatErrorMessage(error)}`,
+      });
+      return undefined;
+    }
+  };
+
   const controlUiSurfaces = new Set<PluginControlUiDescriptor["surface"]>([
     "session",
     "tool",
@@ -2411,15 +2447,15 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
   };
 
   const registerSessionAction = (record: PluginRecord, action: PluginSessionActionRegistration) => {
-    const id = normalizeHostHookString(action.id);
-    const description = normalizeOptionalHostHookString(action.description);
-    const requiredScopes = normalizeHostHookStringList(action.requiredScopes);
-    if (
-      !id ||
-      description === "" ||
-      requiredScopes === null ||
-      typeof action.handler !== "function"
-    ) {
+    const fields = readSessionActionRegistrationFields(record, action);
+    if (!fields) {
+      return;
+    }
+    const id = normalizeHostHookString(fields.id);
+    const description = normalizeOptionalHostHookString(fields.description);
+    const requiredScopes = normalizeHostHookStringList(fields.requiredScopes);
+    const handler = fields.handler;
+    if (!id || description === "" || requiredScopes === null || typeof handler !== "function") {
       pushDiagnostic({
         level: "error",
         pluginId: record.id,
@@ -2440,7 +2476,7 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
         return;
       }
     }
-    if (!validateSessionActionSchema(record, id, action.schema)) {
+    if (!validateSessionActionSchema(record, id, fields.schema)) {
       return;
     }
     const existing = (registry.sessionActions ?? []).find(
@@ -2458,13 +2494,16 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
     (registry.sessionActions ??= []).push({
       pluginId: record.id,
       pluginName: record.name,
+      // Store normalized snapshots so plugin-owned accessors cannot re-run
+      // after validation or poison request-time dispatch.
       action: {
-        ...action,
         id,
         ...(description !== undefined ? { description } : {}),
+        ...(fields.schema !== undefined ? { schema: fields.schema } : {}),
         ...(requiredScopes !== undefined
           ? { requiredScopes: requiredScopes as OperatorScope[] }
           : {}),
+        handler,
       },
       source: record.source,
       rootDir: record.rootDir,

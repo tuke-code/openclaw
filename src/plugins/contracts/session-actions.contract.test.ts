@@ -242,6 +242,60 @@ describe("plugin session actions", () => {
     );
   });
 
+  it("snapshots session action schemas during registration", async () => {
+    let schemaReads = 0;
+    const handlerCalls: unknown[] = [];
+    const schema = {
+      type: "object",
+      additionalProperties: false,
+      required: ["version"],
+      properties: {
+        version: { type: "string" },
+      },
+    };
+    const { registry } = registerActionFixture({
+      id: "volatile-session-action-schema",
+      name: "Volatile Session Action Schema",
+      register(api) {
+        api.registerSessionAction({
+          id: "approve",
+          get schema() {
+            schemaReads += 1;
+            if (schemaReads > 1) {
+              throw new Error("schema getter re-read");
+            }
+            return schema;
+          },
+          handler: ({ payload }) => {
+            handlerCalls.push(payload);
+            return { result: { accepted: true } };
+          },
+        });
+      },
+    });
+
+    expect(registry.registry.sessionActions?.[0]?.action.schema).toEqual(schema);
+    expect(schemaReads).toBe(1);
+    setActivePluginRegistry(registry.registry);
+
+    await expect(
+      callRegisteredSessionActionForTest({
+        pluginId: "volatile-session-action-schema",
+        actionId: "approve",
+        extra: { payload: { version: "2026.06.05" } },
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      payload: {
+        ok: true,
+        result: { accepted: true },
+      },
+      error: undefined,
+    });
+    expect(schemaReads).toBe(1);
+    expect(handlerCalls).toEqual([{ version: "2026.06.05" }]);
+  });
+
   it("validates payload schemas and typed action results", async () => {
     const callSchemaAction = (
       actionId: string,

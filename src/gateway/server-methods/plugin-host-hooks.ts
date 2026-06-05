@@ -140,11 +140,9 @@ export const pluginHostHookHandlers: GatewayRequestHandlers = {
         );
         return;
       }
-      if (registration.action.schema !== undefined) {
-        if (
-          typeof registration.action.schema !== "boolean" &&
-          !isRecord(registration.action.schema)
-        ) {
+      const actionSchema = registration.action.schema;
+      if (actionSchema !== undefined) {
+        if (typeof actionSchema !== "boolean" && !isRecord(actionSchema)) {
           respond(
             false,
             undefined,
@@ -158,7 +156,7 @@ export const pluginHostHookHandlers: GatewayRequestHandlers = {
         // Schemas are plugin-provided data; validate their shape before passing
         // them into the shared schema evaluator so malformed plugins fail cleanly.
         const validation = validateJsonSchemaValue({
-          schema: registration.action.schema as JsonSchemaValue,
+          schema: actionSchema as JsonSchemaValue,
           cacheKey: `plugin-session-action:${pluginId}:${actionId}`,
           value: params.payload,
         });
