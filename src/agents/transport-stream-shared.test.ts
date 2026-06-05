@@ -100,4 +100,83 @@ describe("transport stream shared helpers", () => {
     });
     expect(end).toHaveBeenCalledTimes(1);
   });
+
+  it("marks hostile transport failures without crashing error finalization", () => {
+    const push = vi.fn();
+    const end = vi.fn();
+    const output: {
+      errorBody?: string;
+      errorCode?: string;
+      errorMessage?: string;
+      errorType?: string;
+      stopReason: string;
+    } = { stopReason: "stop" };
+    const error = new Error("transport failed") as Error & {
+      body?: unknown;
+      code?: unknown;
+      error?: unknown;
+      type?: unknown;
+    };
+    for (const key of ["message", "code", "type", "body", "error"] as const) {
+      Object.defineProperty(error, key, {
+        get() {
+          throw new Error(`${key} denied`);
+        },
+      });
+    }
+
+    failTransportStream({
+      stream: { push, end },
+      output,
+      error,
+    });
+
+    expect(output).toEqual({
+      stopReason: "error",
+      errorMessage: "Error",
+    });
+    expect(push).toHaveBeenCalledWith({
+      type: "error",
+      reason: "error",
+      error: output,
+    });
+    expect(end).toHaveBeenCalledTimes(1);
+  });
+
+  it("marks proxy transport failures without relying on instanceof", () => {
+    const push = vi.fn();
+    const end = vi.fn();
+    const output: { errorMessage?: string; stopReason: string } = { stopReason: "stop" };
+    const error = new Proxy(
+      {},
+      {
+        get() {
+          throw new Error("property denied");
+        },
+        getPrototypeOf() {
+          throw new Error("prototype denied");
+        },
+        ownKeys() {
+          throw new Error("keys denied");
+        },
+      },
+    );
+
+    failTransportStream({
+      stream: { push, end },
+      output,
+      error,
+    });
+
+    expect(output).toEqual({
+      stopReason: "error",
+      errorMessage: "Unknown transport error",
+    });
+    expect(push).toHaveBeenCalledWith({
+      type: "error",
+      reason: "error",
+      error: output,
+    });
+    expect(end).toHaveBeenCalledTimes(1);
+  });
 });

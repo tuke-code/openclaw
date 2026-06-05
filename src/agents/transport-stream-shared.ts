@@ -143,7 +143,12 @@ function readStringLikeProperty(value: unknown, key: string): string | undefined
   if (!value || typeof value !== "object") {
     return undefined;
   }
-  const raw = (value as Record<string, unknown>)[key];
+  let raw: unknown;
+  try {
+    raw = (value as Record<string, unknown>)[key];
+  } catch {
+    return undefined;
+  }
   if (typeof raw === "string") {
     const trimmed = raw.trim();
     return trimmed || undefined;
@@ -158,7 +163,12 @@ function readObjectProperty(value: unknown, key: string): Record<string, unknown
   if (!value || typeof value !== "object") {
     return undefined;
   }
-  const raw = (value as Record<string, unknown>)[key];
+  let raw: unknown;
+  try {
+    raw = (value as Record<string, unknown>)[key];
+  } catch {
+    return undefined;
+  }
   return raw && typeof raw === "object" && !Array.isArray(raw)
     ? (raw as Record<string, unknown>)
     : undefined;
@@ -210,13 +220,26 @@ export function extractTransportErrorDetails(error: unknown): TransportErrorDeta
   };
 }
 
+function describeTransportError(error: unknown): string {
+  const errorMessage = readStringLikeProperty(error, "message");
+  const errorName = readStringLikeProperty(error, "name");
+  if (errorMessage || errorName) {
+    return errorMessage ?? errorName ?? "Unknown transport error";
+  }
+  if (typeof error === "string") {
+    return error;
+  }
+  const json = stringifyErrorBody(error);
+  return json?.trim() ? json : "Unknown transport error";
+}
+
 export function assignTransportErrorDetails(
   output: TransportOutputShape,
   error: unknown,
   signal?: AbortSignal,
 ): void {
   output.stopReason = signal?.aborted ? "aborted" : "error";
-  output.errorMessage = error instanceof Error ? error.message : JSON.stringify(error);
+  output.errorMessage = describeTransportError(error);
   Object.assign(output, extractTransportErrorDetails(error));
 }
 
