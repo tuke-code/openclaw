@@ -276,10 +276,15 @@ describe("startCodexAttemptThread", () => {
       paths,
       skipStartSpy: true,
     });
-    const rejected = expect(run).rejects.toThrow("codex app-server startup timed out");
+    const runError = run.then(
+      () => undefined,
+      (error: unknown) => error,
+    );
     const threadStart = await waitForThreadStart(retained);
 
-    await rejected;
+    const error = await runError;
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe("codex app-server startup timed out");
     expect(retained.process.stdin.destroyed).toBe(false);
 
     retained.send({ id: threadStart.id, result: { threadId: "late-thread" } });
