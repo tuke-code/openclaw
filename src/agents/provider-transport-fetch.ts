@@ -1,33 +1,31 @@
 /**
  * Guarded provider fetch transport utilities.
  *
- * Applies request timeouts, proxy/TLS overrides, SSRF policy, local-service leases, retry hints, and SSE normalization.
+ * Applies request timeouts, proxy/TLS overrides, local-service leases, retry hints, and SSE normalization.
  */
-import {
-  isCloudMetadataIpAddress,
-  isLinkLocalIpAddress,
-  parseCanonicalIpAddress,
-} from "@openclaw/net-policy/ip";
 import {
   asFiniteNumberInRange,
   clampTimerTimeoutMs,
   parseStrictFiniteNumber,
   parseStrictNonNegativeInteger,
 } from "@openclaw/normalization-core/number-coercion";
-import {
-  fetchWithSsrFGuard,
-  withTrustedEnvProxyGuardedFetchMode,
-} from "../infra/net/fetch-guard.js";
+import type { Dispatcher } from "undici";
 import { shouldUseEnvHttpProxyForUrl } from "../infra/net/proxy-env.js";
 import {
-  mergeSsrFPolicies,
-  ssrfPolicyFromHttpBaseUrlFakeIpHostnameAllowlist,
-  ssrfPolicyFromHttpBaseUrlAllowedOrigin,
-  type SsrFPolicy,
-} from "../infra/net/ssrf.js";
+  fetchWithRuntimeDispatcherOrMockedGlobal,
+  type DispatcherAwareRequestInit,
+} from "../infra/net/runtime-fetch.js";
+import { closeDispatcher, type PinnedDispatcherPolicy } from "../infra/net/ssrf.js";
+import {
+  createHttp1Agent,
+  createHttp1EnvHttpProxyAgent,
+  createHttp1ProxyAgent,
+} from "../infra/net/undici-runtime.js";
 import type { Model } from "../llm/types.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import { resolveDebugProxySettings } from "../proxy-capture/env.js";
+import { captureHttpExchange } from "../proxy-capture/runtime.js";
+import { buildTimeoutAbortSignal } from "../utils/fetch-timeout.js";
 import { emitModelTransportDebug } from "./model-transport-debug.js";
 import { formatModelTransportDebugUrl } from "./model-transport-url.js";
 import { ProviderHttpError, readResponseTextLimited } from "./provider-http-errors.js";
@@ -45,7 +43,6 @@ import {
 const DEFAULT_MAX_SDK_RETRY_WAIT_SECONDS = 60;
 const OPENAI_SDK_STREAM_CONTENT_SNIFF_BYTES = 2 * 1024;
 const log = createSubsystemLogger("provider-transport-fetch");
-const BLOCKED_EXACT_ORIGIN_TRUST_HOSTNAME_LABELS = new Set(["instance-data"]);
 const PLAIN_DECIMAL_NUMBER_RE = /^\d+(?:\.\d+)?$/;
 const RETRY_AFTER_HTTP_DATE_RE =
   /^(?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun), \d{2} (?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{4} \d{2}:\d{2}:\d{2} GMT|(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday), \d{2}-(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)-\d{2} \d{2}:\d{2}:\d{2} GMT|(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) (?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) [ \d]\d \d{2}:\d{2}:\d{2} \d{4})$/;
@@ -620,96 +617,113 @@ function buildModelRequestSignal(
   return AbortSignal.any([baseSignal, timeoutSignal]);
 }
 
-function resolveHttpOrigin(value: unknown): string | undefined {
-  if (typeof value !== "string" || !value.trim()) {
-    return undefined;
+type ProviderTransportFetchResult = {
+  response: Response;
+  release: () => Promise<void>;
+  refreshTimeout?: () => void;
+};
+
+function createProviderTransportDispatcher(
+  dispatcherPolicy: PinnedDispatcherPolicy | undefined,
+  useEnvProxy: boolean,
+  timeoutMs: number | undefined,
+): Dispatcher | null {
+  if (dispatcherPolicy?.mode === "direct") {
+    return createHttp1Agent(
+      dispatcherPolicy.connect ? { connect: { ...dispatcherPolicy.connect } } : undefined,
+      timeoutMs,
+    );
   }
-  try {
-    const parsed = new URL(value);
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-      return undefined;
-    }
-    parsed.hostname = parsed.hostname.replace(/\.+$/, "");
-    return parsed.origin.toLowerCase();
-  } catch {
-    return undefined;
+  if (dispatcherPolicy?.mode === "env-proxy") {
+    return createHttp1EnvHttpProxyAgent(
+      {
+        ...(dispatcherPolicy.connect ? { connect: { ...dispatcherPolicy.connect } } : {}),
+        ...(dispatcherPolicy.proxyTls ? { proxyTls: { ...dispatcherPolicy.proxyTls } } : {}),
+      },
+      timeoutMs,
+    );
   }
+  if (dispatcherPolicy?.mode === "explicit-proxy") {
+    const proxyUrl = dispatcherPolicy.proxyUrl.trim();
+    return dispatcherPolicy.proxyTls
+      ? createHttp1ProxyAgent(
+          { uri: proxyUrl, requestTls: { ...dispatcherPolicy.proxyTls } },
+          timeoutMs,
+        )
+      : createHttp1ProxyAgent({ uri: proxyUrl }, timeoutMs);
+  }
+  return useEnvProxy ? createHttp1EnvHttpProxyAgent(undefined, timeoutMs) : null;
 }
 
-function normalizeProviderOriginHostname(value: unknown): string | undefined {
-  if (typeof value !== "string" || !value.trim()) {
-    return undefined;
-  }
-  try {
-    const parsed = new URL(value);
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-      return undefined;
-    }
-    const normalized = parsed.hostname.trim().toLowerCase().replace(/\.+$/, "");
-    return normalized || undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function canImplicitlyTrustConfiguredBaseUrlOrigin(value: unknown): value is string {
-  const hostname = normalizeProviderOriginHostname(value);
-  if (!hostname) {
-    return false;
-  }
-  const labels = hostname.split(".").filter(Boolean);
-  return (
-    !labels.some(
-      (label) =>
-        label.includes("metadata") || BLOCKED_EXACT_ORIGIN_TRUST_HOSTNAME_LABELS.has(label),
-    ) &&
-    !isLinkLocalIpAddress(hostname) &&
-    !isCloudMetadataIpAddress(hostname)
-  );
-}
-
-function canApplyFakeIpHostnamePolicy(value: unknown): value is string {
-  const hostname = normalizeProviderOriginHostname(value);
-  if (!hostname) {
-    return false;
-  }
-  const labels = hostname.split(".").filter(Boolean);
-  return (
-    !labels.some(
-      (label) =>
-        label.includes("metadata") || BLOCKED_EXACT_ORIGIN_TRUST_HOSTNAME_LABELS.has(label),
-    ) && !parseCanonicalIpAddress(hostname)
-  );
-}
-
-function resolveModelTransportSsrFPolicy(params: {
-  model: Model;
+function captureProviderTransportExchange(params: {
   url: string;
-  allowPrivateNetwork?: boolean;
-  trustConfiguredBaseUrlOrigin?: boolean;
-}): SsrFPolicy | undefined {
-  const baseUrl = (params.model as { baseUrl?: unknown }).baseUrl;
-  const baseOrigin = resolveHttpOrigin(baseUrl);
-  const requestOrigin = resolveHttpOrigin(params.url);
-  const requestMatchesBaseOrigin =
-    typeof baseUrl === "string" && Boolean(baseOrigin) && requestOrigin === baseOrigin;
-  const baseUrlOriginPolicy =
-    requestMatchesBaseOrigin &&
-    params.trustConfiguredBaseUrlOrigin &&
-    canImplicitlyTrustConfiguredBaseUrlOrigin(baseUrl)
-      ? ssrfPolicyFromHttpBaseUrlAllowedOrigin(baseUrl)
-      : undefined;
-  // Fake-IP trust is hostname-scoped and orthogonal to exact-origin private-IP trust.
-  // It is for DNS hostnames only and does not allow literal private IPs by itself.
-  const fakeIpPolicy =
-    requestMatchesBaseOrigin && canApplyFakeIpHostnamePolicy(baseUrl)
-      ? ssrfPolicyFromHttpBaseUrlFakeIpHostnameAllowlist(baseUrl)
-      : undefined;
-  return mergeSsrFPolicies(
-    baseUrlOriginPolicy,
-    fakeIpPolicy,
-    params.allowPrivateNetwork ? { allowPrivateNetwork: true } : undefined,
+  init?: RequestInit;
+  response: Response;
+  model: Model;
+}): void {
+  captureHttpExchange({
+    url: params.url,
+    method: params.init?.method ?? "GET",
+    requestHeaders: params.init?.headers as Headers | Record<string, string> | undefined,
+    requestBody:
+      (params.init as (RequestInit & { body?: BodyInit | null }) | undefined)?.body ?? null,
+    response: params.response,
+    transport: "http",
+    meta: {
+      captureOrigin: "provider-transport",
+      provider: params.model.provider,
+      api: params.model.api,
+      model: params.model.id,
+    },
+  });
+}
+
+async function fetchProviderTransport(params: {
+  url: string;
+  init?: RequestInit;
+  dispatcherPolicy?: PinnedDispatcherPolicy;
+  useEnvProxy: boolean;
+  timeoutMs?: number;
+  signal?: AbortSignal;
+  model: Model;
+}): Promise<ProviderTransportFetchResult> {
+  const { signal, cleanup, refresh } = buildTimeoutAbortSignal({
+    timeoutMs: params.timeoutMs,
+    signal: params.signal,
+    operation: "providerTransportFetch",
+    url: params.url,
+  });
+  const dispatcher = createProviderTransportDispatcher(
+    params.dispatcherPolicy,
+    params.useEnvProxy,
+    params.timeoutMs,
   );
+  let released = false;
+  const release = async () => {
+    if (released) {
+      return;
+    }
+    released = true;
+    cleanup();
+    await closeDispatcher(dispatcher);
+  };
+  try {
+    const init: DispatcherAwareRequestInit = {
+      ...(params.init ? { ...params.init } : {}),
+      ...(signal ? { signal } : {}),
+      ...(dispatcher ? { dispatcher } : {}),
+    };
+    const response = await fetchWithRuntimeDispatcherOrMockedGlobal(params.url, init);
+    captureProviderTransportExchange({ url: params.url, init, response, model: params.model });
+    return {
+      response,
+      release,
+      refreshTimeout: refresh,
+    };
+  } catch (error) {
+    await release();
+    throw error;
+  }
 }
 
 export function buildGuardedModelFetch(
@@ -750,17 +764,6 @@ export function buildGuardedModelFetch(
           : (() => {
               throw new Error("Unsupported fetch input for transport-aware model request");
             })());
-    const policy = resolveModelTransportSsrFPolicy({
-      model,
-      url,
-      allowPrivateNetwork: requestConfig.allowPrivateNetwork,
-      // Only operator-configured custom/local endpoints get exact-origin trust;
-      // known public/native providers keep the default rebinding checks.
-      trustConfiguredBaseUrlOrigin:
-        !requestConfig.privateNetworkExplicitlyDenied &&
-        (requestConfig.policy?.endpointClass === "custom" ||
-          requestConfig.policy?.endpointClass === "local"),
-    });
     const requestInit =
       request &&
       ({
@@ -775,33 +778,14 @@ export function buildGuardedModelFetch(
     const synthesizeJsonAsSse = await requestBodyHasStreamTrue(request, baseInit);
     const baseSignal = baseInit?.signal ?? undefined;
     const localServiceSignal = buildModelRequestSignal(baseSignal, requestTimeoutMs);
-    const guardedFetchOptions = {
-      url,
-      init: baseInit,
-      capture: {
-        meta: {
-          provider: model.provider,
-          api: model.api,
-          model: model.id,
-        },
-      },
-      dispatcherPolicy,
-      timeoutMs: requestTimeoutMs,
-      ...(baseSignal ? { signal: baseSignal } : {}),
-      // Provider transport intentionally keeps the secure default and never
-      // replays unsafe request bodies across cross-origin redirects.
-      allowCrossOriginUnsafeRedirectReplay: false,
-      ...(policy ? { policy } : {}),
-    };
-    let result: Awaited<ReturnType<typeof fetchWithSsrFGuard>>;
+    let result: ProviderTransportFetchResult;
     const fetchStartedAt = Date.now();
     const useEnvProxy = !dispatcherPolicy && shouldUseEnvHttpProxyForUrl(url);
     emitModelTransportDebug(
       log,
       `[model-fetch] start provider=${model.provider} api=${model.api} model=${model.id} ` +
         `method=${baseInit?.method ?? "GET"} url=${formatModelTransportDebugUrl(url)} timeoutMs=${requestTimeoutMs} ` +
-        `proxy=${dispatcherPolicy ? "configured" : useEnvProxy ? "env" : "none"} ` +
-        `policy=${policy ? "custom" : "default"}`,
+        `proxy=${dispatcherPolicy ? "configured" : useEnvProxy ? "env" : "none"}`,
     );
     try {
       localServiceLease = await ensureModelProviderLocalService(
@@ -809,11 +793,15 @@ export function buildGuardedModelFetch(
         baseInit?.headers,
         localServiceSignal,
       );
-      result = await fetchWithSsrFGuard(
-        useEnvProxy
-          ? withTrustedEnvProxyGuardedFetchMode(guardedFetchOptions)
-          : guardedFetchOptions,
-      );
+      result = await fetchProviderTransport({
+        url,
+        init: baseInit,
+        dispatcherPolicy,
+        useEnvProxy,
+        timeoutMs: requestTimeoutMs,
+        ...(baseSignal ? { signal: baseSignal } : {}),
+        model,
+      });
     } catch (error) {
       log.warn(
         `[model-fetch] error provider=${model.provider} api=${model.api} model=${model.id} ` +
