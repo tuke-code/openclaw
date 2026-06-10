@@ -73,6 +73,12 @@ describe("resolveSendPolicy", () => {
       sessionKey: "demo-channel:direct:user-1",
       expected: "deny",
     },
+    {
+      name: "channel-scoped deny fires for account-scoped direct session key",
+      cfg: cfgWithRules([{ action: "deny", match: { channel: "demo-channel" } }]),
+      sessionKey: "agent:main:demo-channel:work:direct:user-1",
+      expected: "deny",
+    },
   ])("$name", ({ cfg, entry, sessionKey, expected }) => {
     expect(resolveSendPolicy({ cfg, entry, sessionKey })).toBe(expected);
   });

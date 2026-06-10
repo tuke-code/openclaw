@@ -54,6 +54,9 @@ function deriveChannelFromKey(key?: string) {
   ) {
     return normalizeMatchValue(parts[0]);
   }
+  if (parts.length >= 4 && (parts[2] === "direct" || parts[2] === "dm")) {
+    return normalizeMatchValue(parts[0]);
+  }
   return undefined;
 }
 
