@@ -52,7 +52,6 @@ import {
   collectMessagingMediaUrlsFromRecord,
   collectMessagingMediaUrlsFromToolResult,
   extractMessagingToolSend,
-  extractMessagingToolSendResult,
   extractMessagingToolSourceReplyPayload,
   sanitizeToolArgs,
   sanitizeToolResult,
@@ -768,12 +767,8 @@ export async function executePreparedCliRun(
             }
           }
           if (paramsLocal.target) {
-            const confirmedTarget = extractMessagingToolSendResult(
-              paramsLocal.target,
-              paramsLocal.result,
-            );
             const targetWithContent = {
-              ...confirmedTarget,
+              ...paramsLocal.target,
               ...content,
             };
             const evidenceKey = buildMessagingToolSendEvidenceKey(targetWithContent);
