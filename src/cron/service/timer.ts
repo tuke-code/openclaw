@@ -871,7 +871,9 @@ export function applyJobResult(
         retryDecision.backoffMs !== undefined
       ) {
         normalNext = computeNormalNext();
-        const retryNextRunAtMs = result.endedAt + retryDecision.backoffMs;
+        const retryBackoffAtMs = result.endedAt + retryDecision.backoffMs;
+        const retryFloorAtMs = minIntervalFloorAtMs(state.deps.cronConfig, job);
+        const retryNextRunAtMs = Math.max(retryBackoffAtMs, retryFloorAtMs);
         if (normalNext === undefined) {
           // Preserve the unresolved-cron guard (#66019): do not synthesize a
           // retry when the schedule cannot produce a next scheduled slot.
