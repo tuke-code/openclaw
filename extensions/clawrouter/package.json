@@ -1,0 +1,15 @@
+{
+  "name": "@openclaw/clawrouter-provider",
+  "version": "2026.6.17",
+  "private": true,
+  "description": "OpenClaw ClawRouter transport routing plugin",
+  "type": "module",
+  "devDependencies": {
+    "@openclaw/plugin-sdk": "workspace:*"
+  },
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}

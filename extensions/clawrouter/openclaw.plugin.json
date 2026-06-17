@@ -1,0 +1,49 @@
+{
+  "id": "clawrouter",
+  "activation": {
+    "onStartup": false
+  },
+  "enabledByDefault": false,
+  "providers": ["clawrouter"],
+  "setup": {
+    "providers": [
+      {
+        "id": "clawrouter",
+        "envVars": ["CLAWROUTER_API_KEY"]
+      }
+    ]
+  },
+  "providerAuthChoices": [
+    {
+      "provider": "clawrouter",
+      "method": "api-key",
+      "choiceId": "clawrouter-api-key",
+      "choiceLabel": "ClawRouter proxy key",
+      "choiceHint": "Managed access to approved provider routes",
+      "groupId": "clawrouter",
+      "groupLabel": "ClawRouter",
+      "groupHint": "Managed provider access",
+      "optionKey": "clawrouterApiKey",
+      "cliFlag": "--clawrouter-api-key",
+      "cliOption": "--clawrouter-api-key <key>",
+      "cliDescription": "ClawRouter proxy key"
+    }
+  ],
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "baseUrl": {
+        "type": "string",
+        "description": "ClawRouter root URL. Defaults to the hosted ClawRouter endpoint."
+      },
+      "providers": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Canonical providers to route. Omit or include '*' to route every catalog-approved provider."
+      }
+    }
+  }
+}
