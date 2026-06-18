@@ -149,6 +149,31 @@ describe("startGatewayMemoryBackend", () => {
     expect(log.warn).not.toHaveBeenCalled();
   });
 
+  it("runs qmd boot sync for agents with explicit backend or qmd configuration", async () => {
+    const cfg = createQmdConfig(
+      {
+        list: [
+          { id: "main", default: true },
+          { id: "backend", memory: { backend: "qmd" } },
+          {
+            id: "qmd",
+            memory: { qmd: { update: { startup: "immediate", interval: "0s", embedInterval: "0s" } } },
+          },
+          { id: "lazy" },
+        ],
+      },
+      { startup: "immediate", interval: "0s", embedInterval: "0s" },
+    );
+
+    const log = await startQmdBackendWithManager(cfg);
+
+    expectQmdManagerRequests(cfg, ["main", "backend", "qmd"]);
+    expectBootSyncCompleted(log, 3, '"main", "backend", "qmd"');
+    expect(log.info).toHaveBeenCalledWith(
+      'qmd memory startup initialization deferred for 1 agent: "lazy"',
+    );
+  });
+
   it("initializes all qmd agents when memory search is explicitly enabled in defaults", async () => {
     const cfg = createQmdConfig(
       {
