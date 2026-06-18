@@ -2,10 +2,10 @@
 import { html, nothing } from "lit";
 import { guard } from "lit/directives/guard.js";
 import { styleMap } from "lit/directives/style-map.js";
-import { controlUiRouter } from "../app/control-ui-router.ts";
 import { hasOperatorAdminAccess, hasOperatorWriteAccess } from "../app/operator-access.ts";
 import { i18n, t } from "../i18n/index.ts";
 import { getSafeLocalStorage } from "../local-storage.ts";
+import { appRouter } from "../router/index.ts";
 import {
   iconForRoute,
   isSettingsRoute,
@@ -1181,7 +1181,7 @@ export function renderApp(state: AppViewState) {
   const cronNext = state.cronStatus?.nextWakeAtMs ?? null;
   const chatDisabledReason = state.connected ? null : t("chat.disconnected");
   const isChat = state.routeId === "chat";
-  const activeRoute = controlUiRouter.getRoute(state.routeId);
+  const activeRoute = appRouter.getRoute(state.routeId);
   const routedPage =
     activeRoute?.render({
       state,
