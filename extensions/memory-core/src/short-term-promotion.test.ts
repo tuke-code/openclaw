@@ -1425,13 +1425,16 @@ describe("short-term promotion", () => {
     });
   });
 
-  it("serializes shared MEMORY.md writes across agent-scoped promotion stores", async () => {
+  it("serializes shared MEMORY.md writes across symlinked agent workspaces", async () => {
     await withTempWorkspace(async (workspaceDir) => {
       await writeDailyMemoryNote(workspaceDir, "2026-04-03", [
         "Research promotion.",
         "Writer promotion.",
       ]);
       const memoryPath = path.join(workspaceDir, "MEMORY.md");
+      const aliasWorkspaceDir = path.join(fixtureRoot, `case-${caseId++}-alias`);
+      const aliasMemoryPath = path.join(aliasWorkspaceDir, "MEMORY.md");
+      await fs.symlink(workspaceDir, aliasWorkspaceDir);
       const originalReadFile = fs.readFile.bind(fs);
       let memoryReadCount = 0;
       let releaseFirstMemoryRead!: () => void;
@@ -1439,7 +1442,7 @@ describe("short-term promotion", () => {
         releaseFirstMemoryRead = resolve;
       });
       vi.spyOn(fs, "readFile").mockImplementation(async (filePath, options) => {
-        if (filePath === memoryPath) {
+        if (filePath === memoryPath || filePath === aliasMemoryPath) {
           memoryReadCount += 1;
           if (memoryReadCount === 1) {
             await firstMemoryRead;
@@ -1491,7 +1494,7 @@ describe("short-term promotion", () => {
       });
       await vi.waitFor(() => expect(memoryReadCount).toBe(1));
       const writer = applyShortTermPromotions({
-        workspaceDir,
+        workspaceDir: aliasWorkspaceDir,
         agentId: "writer",
         candidates: [
           candidate({

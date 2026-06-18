@@ -932,8 +932,12 @@ async function withMemoryFileWriteLock<T>(
   workspaceDir: string,
   task: () => Promise<T>,
 ): Promise<T> {
-  const lockKey = memoryCoreWorkspaceStateKey(workspaceDir);
-  const lockRef = memoryCoreStateReference(SHORT_TERM_MEMORY_FILE_LOCK_NAMESPACE, workspaceDir);
+  const physicalWorkspaceDir = await fs.realpath(workspaceDir);
+  const lockKey = memoryCoreWorkspaceStateKey(physicalWorkspaceDir);
+  const lockRef = memoryCoreStateReference(
+    SHORT_TERM_MEMORY_FILE_LOCK_NAMESPACE,
+    physicalWorkspaceDir,
+  );
   const lockStore = openMemoryCoreStateStore<ShortTermLockEntry>({
     namespace: SHORT_TERM_MEMORY_FILE_LOCK_NAMESPACE,
     maxEntries: SHORT_TERM_LOCK_MAX_ENTRIES,
