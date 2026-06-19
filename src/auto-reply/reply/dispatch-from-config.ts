@@ -3113,7 +3113,7 @@ export async function dispatchReplyFromConfig(
                 // Exclude status notices — they are informational UI signals
                 // and must not be synthesised into the spoken reply.
                 const isStatusNotice = isReplyPayloadStatusNotice(payload);
-                if (payload.text && !isStatusNotice) {
+                if (payload.text && !isStatusNotice && payload.isReasoning !== true) {
                   const joinsBufferedTtsDirective =
                     cleanBlockTtsDirectiveText?.hasBufferedDirectiveText() === true;
                   if (accumulatedBlockText.length > 0) {

@@ -7380,6 +7380,38 @@ describe("dispatchReplyFromConfig", () => {
     expect(blockReplySentTexts).toContain("The answer is 42");
   });
 
+  it("keeps Telegram isReasoning block replies out of final TTS fallback", async () => {
+    setNoAbort();
+    ttsMocks.state.synthesizeFinalAudio = true;
+    const dispatcher = createDispatcher();
+    const ctx = buildTestCtx({ Provider: "telegram", Surface: "telegram" });
+    const blockReplySentTexts: string[] = [];
+    const replyResolver = async (
+      _ctx: MsgContext,
+      opts?: GetReplyOptions,
+    ): Promise<ReplyPayload | undefined> => {
+      await opts?.onBlockReply?.({ text: "thinking...", isReasoning: true });
+      await opts?.onBlockReply?.({ text: "The answer is 42" });
+      return undefined;
+    };
+    (dispatcher.sendBlockReply as ReturnType<typeof vi.fn>).mockImplementation(
+      (payload: ReplyPayload) => {
+        if (payload.text) {
+          blockReplySentTexts.push(payload.text);
+        }
+        return true;
+      },
+    );
+
+    await dispatchReplyFromConfig({ ctx, cfg: emptyConfig, dispatcher, replyResolver });
+
+    expect(blockReplySentTexts).toEqual(["thinking...", "The answer is 42"]);
+    const ttsCall = ttsMocks.maybeApplyTtsToPayload.mock.calls
+      .map(([call]) => call as { kind?: unknown; payload?: ReplyPayload })
+      .find((call) => call.kind === "final");
+    expect(ttsCall?.payload).toEqual({ text: "The answer is 42" });
+  });
+
   it("strips split TTS directives from streamed block text before delivery", async () => {
     setNoAbort();
     ttsMocks.state.synthesizeFinalAudio = true;
