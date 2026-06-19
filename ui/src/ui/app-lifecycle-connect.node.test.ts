@@ -39,13 +39,12 @@ vi.mock("./app-settings.ts", () => ({
   attachThemeListener: vi.fn(),
   detachThemeListener: vi.fn(),
   inferBasePath: vi.fn(() => "/"),
-  syncRouteWithLocation: vi.fn(),
+  syncSessionWithLocation: vi.fn(),
   syncThemeWithSettings: vi.fn(),
 }));
 
 vi.mock("./app-polling.ts", () => ({
   startLogsPolling: vi.fn(),
-  startNodesPolling: vi.fn(),
   stopLogsPolling: vi.fn(),
   stopNodesPolling: vi.fn(),
   startDebugPolling: vi.fn(),
@@ -59,10 +58,8 @@ vi.mock("./app-scroll.ts", () => ({
 }));
 
 import { handleConnected, handleUpdated } from "./app-lifecycle.ts";
-import { startNodesPolling } from "./app-polling.ts";
 import { scheduleChatScroll } from "./app-scroll.ts";
 
-const startNodesPollingMock = vi.mocked(startNodesPolling);
 const scheduleChatScrollMock = vi.mocked(scheduleChatScroll);
 
 function createDeferred() {
@@ -105,7 +102,7 @@ function createHost() {
     logsAutoFollow: false,
     logsAtBottom: true,
     logsEntries: [],
-    popStateHandler: vi.fn(),
+    sessionPopStateHandler: vi.fn(),
     topbarObserver: null,
   };
 }
@@ -118,7 +115,6 @@ describe("handleConnected", () => {
     enterInitialActiveRouteMock.mockReset();
     restoreComposerMock.mockReset();
     restoreComposerMock.mockReturnValue(false);
-    startNodesPollingMock.mockReset();
     scheduleChatScrollMock.mockReset();
     vi.stubGlobal("window", {
       addEventListener: vi.fn(),
@@ -213,18 +209,16 @@ describe("handleConnected", () => {
     expect(connectGatewayMock).toHaveBeenCalledWith(host);
   });
 
-  it("starts active route polling on connect", () => {
+  it("starts the router from the current location on connect", () => {
     loadBootstrapMock.mockResolvedValue(undefined);
     const chatHost = createHost();
 
     handleConnected(chatHost as never);
-    expect(startNodesPollingMock).not.toHaveBeenCalled();
     expect(enterInitialActiveRouteMock).toHaveBeenCalledWith(chatHost);
 
     const nodesHost = createHost();
     nodesHost.routeId = "nodes";
     handleConnected(nodesHost as never);
-    expect(startNodesPollingMock).toHaveBeenCalledWith(nodesHost);
     expect(enterInitialActiveRouteMock).toHaveBeenCalledWith(nodesHost);
 
     const logsHost = createHost();
