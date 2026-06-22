@@ -80,8 +80,15 @@ export function createChannelProgressDraftCompositor(params: {
     lastReasoningLine = undefined;
   };
 
-  const render = async (options?: { flush?: boolean }): Promise<boolean> => {
-    if (!params.active || params.mode !== "progress" || finalReplyStarted || finalReplyDelivered) {
+  const render = async (options?: {
+    flush?: boolean;
+    allowAfterFinal?: boolean;
+  }): Promise<boolean> => {
+    if (
+      !params.active ||
+      params.mode !== "progress" ||
+      ((finalReplyStarted || finalReplyDelivered) && !options?.allowAfterFinal)
+    ) {
       return false;
     }
     const text = formatDraftText();
@@ -89,7 +96,11 @@ export function createChannelProgressDraftCompositor(params: {
       return false;
     }
     lastRenderedText = text;
-    await params.update(text, { ...options, lines: [...lines] });
+    const { allowAfterFinal: _allowAfterFinal, ...updateOptions } = options ?? {};
+    await params.update(text, {
+      ...updateOptions,
+      ...(options?.allowAfterFinal ? {} : { lines: [...lines] }),
+    });
     return true;
   };
 
@@ -158,6 +169,9 @@ export function createChannelProgressDraftCompositor(params: {
       }
     }
     lines = nextLines;
+    if (options?.allowAfterFinal && (finalReplyStarted || finalReplyDelivered)) {
+      return await render({ flush: options.startImmediately, allowAfterFinal: true });
+    }
     if (params.mode !== "progress") {
       if (!shouldStoreLine) {
         return false;

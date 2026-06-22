@@ -132,7 +132,7 @@ export function createDiscordDraftPreviewController(params: {
       return discordStreamMode === "progress";
     },
     get hasProgressDraftStarted() {
-      return progressDraft.hasStarted;
+      return progressDraft.hasStarted || hasStreamedMessage;
     },
     get finalizedViaPreviewMessage() {
       return finalizedViaPreviewMessage;

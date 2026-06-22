@@ -1132,8 +1132,13 @@ export function mergeChannelProgressDraftLine<TLine extends string | ChannelProg
       resolveProgressDraftLineMergeKeys(entry).some((entryKey) => lineKeys.includes(entryKey)),
     );
     if (existingIndex >= 0) {
+      const previous = lines[existingIndex];
       const replacement = mergeProgressDraftLineUpdate(lines[existingIndex], line);
-      if (replacement === lines[existingIndex]) {
+      const replacementIdentity = normalizeChannelProgressDraftLineIdentity(replacement);
+      if (
+        previous === replacement &&
+        normalizeChannelProgressDraftLineIdentity(previous) === replacementIdentity
+      ) {
         return lines;
       }
       const next = [...lines];
