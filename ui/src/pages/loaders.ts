@@ -2,7 +2,6 @@ import type { SettingsAppHost, SettingsHost } from "../app/app-host.ts";
 import { hasOperatorReadAccess } from "../app/operator-access.ts";
 import { t } from "../i18n/index.ts";
 import type { RouteHookOptions } from "../router/types.ts";
-import { refreshChat } from "../ui/app-chat.ts";
 import { scheduleChatScroll } from "../ui/app-scroll.ts";
 import {
   controlUiNowMs,
@@ -30,6 +29,7 @@ import { loadUsage } from "../ui/controllers/usage.ts";
 import { resolveCronJobLastRunStatus } from "../ui/cron-status.ts";
 import { isMonitoredAuthProvider } from "../ui/model-auth-helpers.ts";
 import { normalizeAgentId, parseAgentSessionKey } from "../ui/session-key.ts";
+import { refreshChat } from "./chat/data.ts";
 import { loadConfig, loadConfigSchema } from "./config/data.ts";
 
 export async function loadSettingsPage(host: SettingsHost, app: SettingsAppHost) {

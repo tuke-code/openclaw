@@ -3,30 +3,30 @@
 import { html, render } from "lit";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { i18n, t } from "../../i18n/index.ts";
-import { switchChatSession } from "../app-render.helpers.ts";
-import type { AppViewState } from "../app-view-state.ts";
+import { switchChatSession } from "../../ui/app-render.helpers.ts";
+import type { AppViewState } from "../../ui/app-view-state.ts";
 import {
   createModelCatalog,
   createSessionsListResult,
   DEFAULT_CHAT_MODEL_CATALOG,
-} from "../chat-model.test-helpers.ts";
+} from "../../ui/chat-model.test-helpers.ts";
 import {
   getChatAttachmentDataUrl,
   resetChatAttachmentPayloadStoreForTest,
-} from "../chat/attachment-payload-store.ts";
-import { renderChatQueue } from "../chat/chat-queue.ts";
-import { buildRawSidebarContent } from "../chat/chat-sidebar-raw.ts";
-import { renderWelcomeState } from "../chat/chat-welcome.ts";
+} from "../../ui/chat/attachment-payload-store.ts";
+import { renderChatQueue } from "../../ui/chat/chat-queue.ts";
+import { buildRawSidebarContent } from "../../ui/chat/chat-sidebar-raw.ts";
+import { renderWelcomeState } from "../../ui/chat/chat-welcome.ts";
 import {
   blockArtCodeBlockCopyPayloadEncoding,
   encodeBlockArtCodeBlockCopyPayload,
-} from "../chat/code-block-copy-payload.ts";
-import { renderChatSessionSelect } from "../chat/session-controls.ts";
-import type { GatewayBrowserClient } from "../gateway.ts";
-import type { GatewaySessionRow, ModelCatalogEntry, SessionsListResult } from "../types.ts";
-import type { ChatAttachment, ChatQueueItem } from "../ui-types.ts";
-import { renderChat, resetChatViewState } from "./chat.ts";
-import { renderMarkdownSidebar } from "./markdown-sidebar.ts";
+} from "../../ui/chat/code-block-copy-payload.ts";
+import { renderChatSessionSelect } from "../../ui/chat/session-controls.ts";
+import type { GatewayBrowserClient } from "../../ui/gateway.ts";
+import type { GatewaySessionRow, ModelCatalogEntry, SessionsListResult } from "../../ui/types.ts";
+import type { ChatAttachment, ChatQueueItem } from "../../ui/ui-types.ts";
+import { renderMarkdownSidebar } from "../../ui/views/markdown-sidebar.ts";
+import { renderChat, resetChatViewState } from "./view.ts";
 
 const refreshVisibleToolsEffectiveForCurrentSessionMock = vi.hoisted(() =>
   vi.fn(async (state: AppViewState) => {
@@ -145,15 +145,15 @@ function requireFirstAttachmentsChange(
   return attachments as ChatAttachment[];
 }
 
-vi.mock("../icons.ts", () => ({
+vi.mock("../../ui/icons.ts", () => ({
   icons: {},
 }));
 
-vi.mock("../chat/build-chat-items.ts", () => ({
+vi.mock("../../ui/chat/build-chat-items.ts", () => ({
   buildChatItems: buildChatItemsMock,
 }));
 
-vi.mock("../chat/grouped-render.ts", () => ({
+vi.mock("../../ui/chat/grouped-render.ts", () => ({
   getAssistantAttachmentAvailabilityRenderVersion: () => assistantAttachmentRenderVersionMock.value,
   renderMessageGroup: renderMessageGroupMock,
   renderReadingIndicatorGroup: () => {
@@ -169,26 +169,26 @@ vi.mock("../chat/grouped-render.ts", () => ({
   },
 }));
 
-vi.mock("../markdown.ts", () => ({
+vi.mock("../../ui/markdown.ts", () => ({
   isMarkdownBlockArtText: () => false,
   toSanitizedMarkdownHtml: (value: string) => value,
 }));
 
-vi.mock("../chat/tool-expansion-state.ts", () => ({
+vi.mock("../../ui/chat/tool-expansion-state.ts", () => ({
   getExpandedToolCards: () => new Map<string, boolean>(),
   syncToolCardExpansionState: () => undefined,
 }));
 
-vi.mock("../controllers/agents.ts", () => ({
+vi.mock("../../ui/controllers/agents.ts", () => ({
   refreshVisibleToolsEffectiveForCurrentSession: refreshVisibleToolsEffectiveForCurrentSessionMock,
 }));
 
-vi.mock("../controllers/sessions.ts", () => ({
+vi.mock("../../ui/controllers/sessions.ts", () => ({
   loadSessions: loadSessionsMock,
   syncSelectedSessionMessageSubscription: vi.fn(async () => undefined),
 }));
 
-vi.mock("./agents-utils.ts", () => ({
+vi.mock("../../ui/views/agents-utils.ts", () => ({
   isRenderableControlUiAvatarUrl: (value: string) =>
     /^data:image\//i.test(value) || (value.startsWith("/") && !value.startsWith("//")),
   agentLogoUrl: () => "/openclaw-logo.svg",
