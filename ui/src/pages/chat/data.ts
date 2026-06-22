@@ -34,7 +34,6 @@ import {
   clearChatMessagesFromCache,
   type ChatMessageCache,
 } from "../../ui/chat/session-message-cache.ts";
-import type { ChatSideResult } from "../../ui/chat/side-result.ts";
 import { executeSlashCommand } from "../../ui/chat/slash-command-executor.ts";
 import {
   applyRemoteSlashCommandsResult,
@@ -96,6 +95,7 @@ import {
   type ChatState,
   isGatewayMethodAdvertised,
 } from "./gateway.ts";
+import type { ChatSideResult } from "./side-result.ts";
 import type {
   ChatAttachment,
   ChatQueueItem,

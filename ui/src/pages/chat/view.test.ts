@@ -10,8 +10,6 @@ import {
   createSessionsListResult,
   DEFAULT_CHAT_MODEL_CATALOG,
 } from "../../ui/chat-model.test-helpers.ts";
-import { buildRawSidebarContent } from "../../ui/chat/chat-sidebar-raw.ts";
-import { renderWelcomeState } from "../../ui/chat/chat-welcome.ts";
 import { renderChatSessionSelect } from "../../ui/chat/session-controls.ts";
 import type { GatewayBrowserClient } from "../../ui/gateway.ts";
 import type { GatewaySessionRow, ModelCatalogEntry, SessionsListResult } from "../../ui/types.ts";
@@ -21,6 +19,8 @@ import {
   resetChatAttachmentPayloadStoreForTest,
 } from "./attachment-payload-store.ts";
 import { renderChatQueue } from "./chat-queue.ts";
+import { buildRawSidebarContent } from "./chat-sidebar-raw.ts";
+import { renderWelcomeState } from "./chat-welcome.ts";
 import type { ChatAttachment, ChatQueueItem } from "./types.ts";
 import { renderChat, resetChatViewState } from "./view.ts";
 
@@ -144,7 +144,7 @@ vi.mock("./build-chat-items.ts", () => ({
   buildChatItems: buildChatItemsMock,
 }));
 
-vi.mock("../../ui/chat/grouped-render.ts", () => ({
+vi.mock("./grouped-render.ts", () => ({
   getAssistantAttachmentAvailabilityRenderVersion: () => assistantAttachmentRenderVersionMock.value,
   renderMessageGroup: renderMessageGroupMock,
   renderReadingIndicatorGroup: () => {
@@ -164,7 +164,7 @@ vi.mock("../../ui/markdown.ts", () => ({
   toSanitizedMarkdownHtml: (value: string) => value,
 }));
 
-vi.mock("../../ui/chat/tool-expansion-state.ts", () => ({
+vi.mock("./tool-expansion-state.ts", () => ({
   getExpandedToolCards: () => new Map<string, boolean>(),
   syncToolCardExpansionState: () => undefined,
 }));
