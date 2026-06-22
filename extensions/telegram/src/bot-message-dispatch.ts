@@ -465,23 +465,28 @@ function renderTelegramProgressLine(line: ChannelProgressDraftCompositorLine): s
   return parts.join(" ");
 }
 
+function normalizeTelegramProgressPlainText(text: string): string {
+  return text
+    .replace(/(^|\n)(\s*(?:•\s*)?)`([^`\n]*)`(?=\n|$)/gu, "$1$2$3")
+    .replace(/(^|\n)(\s*(?:•\s*)?)_([^_\n]*)_(?=\n|$)/gu, "$1$2$3");
+}
+
 function renderTelegramProgressDraftPreview(
   text: string,
   lines: readonly ChannelProgressDraftCompositorLine[],
-  richMessages: boolean,
+  _richMessages: boolean,
 ): TelegramDraftPreview {
   const trimmed = text.trimEnd();
   const [heading] = trimmed.split(/\r?\n/u, 1);
   const renderedLines = lines.map(renderTelegramProgressLine).filter(Boolean);
-  const htmlParts = heading?.trim()
+  const hasSeparateHeading =
+    Boolean(heading?.trim()) && (lines.length === 0 || trimmed.includes("\n"));
+  const htmlParts = hasSeparateHeading
     ? [`<b>${escapeTelegramProgressHtml(heading.trim())}</b>`, ...renderedLines]
     : renderedLines;
   const html = htmlParts.join("<br>");
-  if (!richMessages) {
-    return { text: html, parseMode: "HTML" };
-  }
   return {
-    text: trimmed,
+    text: normalizeTelegramProgressPlainText(trimmed),
     richMessage: buildTelegramRichHtml(html, { skipEntityDetection: true }),
   };
 }
@@ -1459,6 +1464,7 @@ export const dispatchTelegramMessage = async ({
     ? ctxPayload.ReplyToQuoteEntities
     : undefined;
   const deliveryState = createLaneDeliveryStateTracker();
+  let transcriptFinalCandidateText: string | undefined;
   const clearGroupHistory = () => {
     if (isGroup && historyKey) {
       createChannelHistoryWindow({ historyMap: groupHistories }).clear({
@@ -1510,6 +1516,7 @@ export const dispatchTelegramMessage = async ({
       if (!latest?.timestamp || latest.timestamp < dispatchStartedAt) {
         return undefined;
       }
+      transcriptFinalCandidateText = latest.text;
       return latest.text;
     } catch (err) {
       logVerbose(`telegram transcript final candidate lookup failed: ${formatErrorMessage(err)}`);
@@ -1745,7 +1752,11 @@ export const dispatchTelegramMessage = async ({
           )}`,
         );
       }
-      if (deliveryBaseOptions.transcriptMirror && result.delivery.content) {
+      if (
+        deliveryBaseOptions.transcriptMirror &&
+        result.delivery.content &&
+        result.delivery.content !== transcriptFinalCandidateText
+      ) {
         void deliveryBaseOptions
           .transcriptMirror({ text: result.delivery.content })
           .catch((err: unknown) => {
