@@ -11,6 +11,7 @@ import {
   releaseChatAttachmentPayloads,
   resetChatAttachmentPayloadStoreForTest,
 } from "./attachment-payload-store.ts";
+import { refreshChatAvatar } from "./chat-avatar.ts";
 import type { ChatHost } from "./data.ts";
 
 type ExecuteSlashCommand = typeof executeSlashCommand;
@@ -47,7 +48,6 @@ let navigateChatInputHistory: typeof import("./data.ts").navigateChatInputHistor
 let handleAbortChat: typeof import("./data.ts").handleAbortChat;
 let hasAbortableSessionRun: typeof import("./data.ts").hasAbortableSessionRun;
 let refreshChat: typeof import("./data.ts").refreshChat;
-let refreshChatAvatar: typeof import("./data.ts").refreshChatAvatar;
 let clearPendingQueueItemsForRun: typeof import("./data.ts").clearPendingQueueItemsForRun;
 let removeQueuedMessage: typeof import("./data.ts").removeQueuedMessage;
 let markQueuedChatSendsWaitingForReconnect: typeof import("./data.ts").markQueuedChatSendsWaitingForReconnect;
@@ -63,7 +63,6 @@ async function loadChatHelpers(): Promise<void> {
     handleAbortChat,
     hasAbortableSessionRun,
     refreshChat,
-    refreshChatAvatar,
     clearPendingQueueItemsForRun,
     removeQueuedMessage,
     markQueuedChatSendsWaitingForReconnect,
@@ -249,7 +248,7 @@ describe("refreshChat", () => {
     await loadChatHelpers();
   });
 
-  it("dispatches chat refresh work without waiting for slow history or metadata RPCs", async () => {
+  it("dispatches chat refresh work without waiting for slow history RPCs", async () => {
     const request = vi.fn(() => pendingPromise());
     const requestUpdate = vi.fn();
     const host = makeHost({
@@ -275,11 +274,6 @@ describe("refreshChat", () => {
       scope: "text",
     });
     expect(requestUpdate).not.toHaveBeenCalled();
-    await vi.waitFor(() =>
-      expect(request).toHaveBeenCalledWith("chat.metadata", { agentId: "main" }),
-    );
-    expect(request).not.toHaveBeenCalledWith("models.list", { view: "configured" });
-    expect(request).not.toHaveBeenCalledWith("commands.list", expect.anything());
   });
 
   it("scopes global chat refresh session rows to the selected agent", async () => {
@@ -301,9 +295,6 @@ describe("refreshChat", () => {
       limit: 100,
     });
     expect(request).not.toHaveBeenCalledWith("sessions.list", expect.anything());
-    await vi.waitFor(() =>
-      expect(request).toHaveBeenCalledWith("chat.metadata", { agentId: "work" }),
-    );
   });
 
   it("scopes agent main aliases as selected global chat refreshes", async () => {
@@ -390,7 +381,7 @@ describe("refreshChat", () => {
     expect(request).not.toHaveBeenCalledWith("sessions.list", expect.anything());
   });
 
-  it("can wait for history without waiting for secondary metadata refreshes", async () => {
+  it("can wait for history without waiting for secondary work", async () => {
     const history = createDeferred<unknown>();
     const requestUpdate = vi.fn();
     const request = vi.fn((method: string) => {
@@ -417,11 +408,6 @@ describe("refreshChat", () => {
     expect(host.chatMessages).toEqual([
       { role: "assistant", content: [{ type: "text", text: "ready" }] },
     ]);
-    expect(request).not.toHaveBeenCalledWith("models.list", { view: "configured" });
-    await vi.waitFor(() =>
-      expect(request).toHaveBeenCalledWith("chat.metadata", { agentId: "main" }),
-    );
-    expect(request).not.toHaveBeenCalledWith("models.list", { view: "configured" });
     expect(requestUpdate).toHaveBeenCalled();
   });
 
@@ -1042,7 +1028,7 @@ describe("refreshChat", () => {
     await loadChatHelpers();
   });
 
-  it("does not wait for secondary chat metadata refreshes before showing history", async () => {
+  it("does not wait for secondary session refreshes before showing history", async () => {
     const previousFetch = globalThis.fetch;
     globalThis.fetch = vi.fn(() => pendingPromise<Response>()) as never;
     try {
@@ -1066,168 +1052,7 @@ describe("refreshChat", () => {
         { role: "assistant", content: [{ type: "text", text: "ready" }] },
       ]);
       expect(request).not.toHaveBeenCalledWith("sessions.list", expect.anything());
-      await vi.waitFor(() =>
-        expect(request).toHaveBeenCalledWith("chat.metadata", { agentId: "main" }),
-      );
-      expect(request).not.toHaveBeenCalledWith("models.list", { view: "configured" });
-      expect(request).not.toHaveBeenCalledWith("commands.list", expect.anything());
     } finally {
-      globalThis.fetch = previousFetch;
-    }
-  });
-
-  it("uses startup metadata without scheduling command or metadata follow-ups", async () => {
-    const { resetSlashCommandsForTest } = await import("../../ui/chat/slash-commands.ts");
-    resetSlashCommandsForTest();
-    const previousFetch = globalThis.fetch;
-    globalThis.fetch = vi.fn().mockResolvedValue({ ok: false }) as never;
-    try {
-      const request = vi.fn((method: string) => {
-        if (method === "chat.startup") {
-          return Promise.resolve({
-            messages: [],
-            metadata: {
-              models: [{ id: "gpt-fast", name: "GPT Fast", provider: "openai" }],
-            },
-          });
-        }
-        return pendingPromise();
-      });
-      const host = makeHost({
-        client: { request } as unknown as ChatHost["client"],
-        sessionKey: "main",
-      });
-
-      await refreshChat(host, { startup: true });
-
-      await vi.waitFor(() => expect(host.chatModelCatalog).toHaveLength(1));
-      await new Promise<void>((resolve) => {
-        setTimeout(resolve, 75);
-      });
-      expect(request).toHaveBeenCalledWith("chat.startup", {
-        sessionKey: "main",
-        limit: 100,
-      });
-      expect(request).not.toHaveBeenCalledWith("chat.metadata", expect.anything());
-      expect(request).not.toHaveBeenCalledWith("models.list", expect.anything());
-      expect(request).not.toHaveBeenCalledWith("commands.list", expect.anything());
-      expect(host.chatModelCatalog).toEqual([
-        { id: "gpt-fast", name: "GPT Fast", provider: "openai" },
-      ]);
-    } finally {
-      resetSlashCommandsForTest();
-      globalThis.fetch = previousFetch;
-    }
-  });
-
-  it("falls back to separate metadata RPCs when chat.metadata is not advertised", async () => {
-    const request = vi.fn(() => pendingPromise());
-    const host = makeHost({
-      client: { request } as unknown as ChatHost["client"],
-      sessionKey: "main",
-      hello: {
-        type: "hello-ok",
-        protocol: 4,
-        auth: { role: "operator", scopes: [] },
-        features: { events: [], methods: ["chat.history"] },
-      },
-    });
-
-    await refreshChat(host);
-
-    await vi.waitFor(() =>
-      expect(request).toHaveBeenCalledWith("models.list", { view: "configured" }),
-    );
-    expect(request).toHaveBeenCalledWith("commands.list", {
-      agentId: "main",
-      includeArgs: true,
-      scope: "text",
-    });
-    expect(request).not.toHaveBeenCalledWith("chat.metadata", expect.anything());
-  });
-
-  it("falls back to separate metadata RPCs when an older gateway rejects chat.metadata", async () => {
-    const { GatewayRequestError } = await import("./gateway.ts");
-    const request = vi.fn((method: string) => {
-      if (method === "chat.metadata") {
-        return Promise.reject(
-          new GatewayRequestError({
-            code: "INVALID_REQUEST",
-            message: "unknown method: chat.metadata",
-          }),
-        );
-      }
-      return pendingPromise();
-    });
-    const host = makeHost({
-      client: { request } as unknown as ChatHost["client"],
-      sessionKey: "main",
-    });
-
-    await refreshChat(host);
-
-    await vi.waitFor(() =>
-      expect(request).toHaveBeenCalledWith("models.list", { view: "configured" }),
-    );
-    expect(request).toHaveBeenCalledWith("commands.list", {
-      agentId: "main",
-      includeArgs: true,
-      scope: "text",
-    });
-  });
-
-  it("ignores stale chat.metadata results after the selected global agent changes", async () => {
-    const { resetSlashCommandsForTest, SLASH_COMMANDS } =
-      await import("../../ui/chat/slash-commands.ts");
-    resetSlashCommandsForTest();
-    const previousFetch = globalThis.fetch;
-    globalThis.fetch = vi.fn().mockResolvedValue({ ok: false }) as never;
-    const metadata = createDeferred<unknown>();
-    const requestUpdate = vi.fn();
-    try {
-      const request = vi.fn((method: string) => {
-        if (method === "chat.history") {
-          return Promise.resolve({ messages: [], thinkingLevel: null });
-        }
-        if (method === "chat.metadata") {
-          return metadata.promise;
-        }
-        return pendingPromise();
-      });
-      const host = makeHost({
-        client: { request } as unknown as ChatHost["client"],
-        sessionKey: "global",
-        assistantAgentId: "work",
-        requestUpdate,
-      });
-
-      await refreshChat(host);
-      await vi.waitFor(() =>
-        expect(request).toHaveBeenCalledWith("chat.metadata", { agentId: "work" }),
-      );
-      host.assistantAgentId = "ops";
-      const updatesBeforeMetadata = requestUpdate.mock.calls.length;
-      metadata.resolve({
-        models: [{ id: "stale-model", name: "Stale Model", provider: "stale-provider" }],
-        commands: [
-          {
-            acceptsArgs: false,
-            description: "stale command",
-            name: "stale-command",
-            scope: "text",
-            source: "native",
-            textAliases: ["/stale-command"],
-          },
-        ],
-      });
-
-      await vi.waitFor(() =>
-        expect(requestUpdate.mock.calls.length).toBeGreaterThan(updatesBeforeMetadata),
-      );
-      expect(host.chatModelCatalog).toEqual([]);
-      expect(SLASH_COMMANDS.some((command) => command.name === "stale-command")).toBe(false);
-    } finally {
-      resetSlashCommandsForTest();
       globalThis.fetch = previousFetch;
     }
   });
