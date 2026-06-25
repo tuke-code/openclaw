@@ -21,10 +21,6 @@ import {
   parseAgentSessionKey,
   resolveAgentIdFromSessionKey,
 } from "../lib/session-key.ts";
-import {
-  scopedAgentListParamsForSession,
-  scopedAgentParamsForSession,
-} from "../lib/sessions/index.ts";
 import { normalizeLowercaseStringOrEmpty, normalizeOptionalString } from "../lib/string-coerce.ts";
 import { refreshChat } from "../pages/chat/data.ts";
 import { createChatSessionsLoadOverrides } from "../pages/chat/session-scope.ts";
@@ -33,7 +29,6 @@ import {
   switchChatSession,
   switchChatSessionAndWait,
 } from "../pages/chat/session-switch.ts";
-import { createSessionAndRefresh } from "../pages/sessions/data.ts";
 import type { AppViewState } from "./app-view-state.ts";
 import {
   renderChatSessionSelect as renderChatSessionSelectBase,
@@ -112,23 +107,6 @@ function resolveSidebarChatSessionKey(state: AppViewState): string {
   }
   return "main";
 }
-
-function canSwitchToNewChatSession(state: AppViewState): boolean {
-  return (
-    !state.chatLoading &&
-    !state.chatSending &&
-    !state.chatRunId &&
-    state.chatStream === null &&
-    state.chatQueue.length === 0
-  );
-}
-
-const NEW_CHAT_ACTIVE_RUN_MESSAGE =
-  "Start a new session after the active run or queued messages finish.";
-const NEW_CHAT_SESSIONS_LOADING_MESSAGE =
-  "Session list is still refreshing. Try New Chat again in a moment.";
-const NEW_CHAT_CREATE_FAILED_MESSAGE =
-  "New Chat could not create a new session. Try again in a moment.";
 
 const ROUTE_PRELOAD_DELAY_MS = 50;
 const routePreloadTimers = new WeakMap<EventTarget, ReturnType<typeof setTimeout>>();
@@ -628,81 +606,6 @@ export function dismissChatError(state: AppViewState) {
   state.lastError = null;
   state.lastErrorCode = null;
   state.chatError = null;
-}
-
-export type CreateChatSessionIntent = {
-  source: "user";
-  onSessionCreated?: (sessionKey: string) => void;
-};
-
-export async function createChatSession(
-  state: AppViewState,
-  intent?: CreateChatSessionIntent,
-): Promise<boolean> {
-  if (intent?.source !== "user") {
-    return false;
-  }
-  if (!state.client || !state.connected) {
-    return false;
-  }
-  if (!canSwitchToNewChatSession(state)) {
-    state.lastError = NEW_CHAT_ACTIVE_RUN_MESSAGE;
-    state.chatError = state.lastError;
-    return false;
-  }
-  if (state.sessionsLoading) {
-    state.lastError = NEW_CHAT_SESSIONS_LOADING_MESSAGE;
-    state.chatError = state.lastError;
-    return false;
-  }
-
-  state.lastError = null;
-  state.chatError = null;
-  const previousSessionKey = state.sessionKey;
-  const normalizedPreviousSessionKey = normalizeOptionalString(previousSessionKey);
-  const parentSessionKey =
-    normalizeLowercaseStringOrEmpty(normalizedPreviousSessionKey) === "unknown"
-      ? undefined
-      : normalizedPreviousSessionKey;
-  const nextSessionKey = await createSessionAndRefresh(
-    state as unknown as Parameters<typeof createSessionAndRefresh>[0],
-    {
-      agentId:
-        scopedAgentParamsForSession(state, previousSessionKey).agentId ??
-        resolveAgentIdFromSessionKey(previousSessionKey),
-      parentSessionKey,
-      emitCommandHooks: parentSessionKey !== undefined ? true : undefined,
-    },
-    {
-      ...createChatSessionsLoadOverrides(state),
-      ...scopedAgentListParamsForSession(state, previousSessionKey),
-    },
-  );
-  if (
-    !nextSessionKey ||
-    state.sessionKey !== previousSessionKey ||
-    !canSwitchToNewChatSession(state)
-  ) {
-    if (!nextSessionKey) {
-      state.lastError =
-        state.sessionsError ??
-        (state.sessionsLoading
-          ? NEW_CHAT_SESSIONS_LOADING_MESSAGE
-          : NEW_CHAT_CREATE_FAILED_MESSAGE);
-      state.chatError = state.lastError;
-    }
-    return false;
-  }
-
-  const preservedDraft = state.chatMessage;
-  const preservedAttachments = state.chatAttachments;
-  switchChatSession(state, nextSessionKey, {
-    syncUrl: intent?.onSessionCreated === undefined,
-  });
-  state.chatMessage = preservedDraft;
-  state.chatAttachments = preservedAttachments;
-  intent?.onSessionCreated?.(nextSessionKey);
-  return true;
 }
 
 /** Count cron sessions hidden by the active agent-scoped chat filter. */

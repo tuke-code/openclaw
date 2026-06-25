@@ -24,6 +24,7 @@ import {
   getVisibleSessionRows,
   scopedAgentListParamsForSession,
   scopedAgentParamsForSession,
+  type SessionCapability,
 } from "../../lib/sessions/index.ts";
 import {
   normalizeLowercaseStringOrEmpty,
@@ -31,7 +32,6 @@ import {
 } from "../../lib/string-coerce.ts";
 import { refreshVisibleToolsEffectiveForCurrentSession } from "../../pages/agents/data.ts";
 import { createChatSessionsLoadOverrides } from "../../pages/chat/session-scope.ts";
-import { loadSessions } from "../../pages/sessions/data.ts";
 import type { AppViewState } from "../app-view-state.ts";
 import { createChatModelOverride } from "../chat-model-ref.ts";
 import {
@@ -83,6 +83,14 @@ const chatSessionPickerSearchControllers = new WeakMap<
 function setChatError(state: AppViewState, error: string | null) {
   state.lastError = error;
   state.chatError = error;
+}
+
+function sessionCapability(state: AppViewState): SessionCapability {
+  const sessions = (state as AppViewState & { sessions?: SessionCapability }).sessions;
+  if (!sessions) {
+    throw new Error("Chat session controls require the application session capability");
+  }
+  return sessions;
 }
 
 export function renderChatSessionSelect(
@@ -153,9 +161,10 @@ function resolveNextChatSessionOffset(
 }
 
 async function refreshSessionOptions(state: AppViewState) {
-  await loadSessions(state as unknown as Parameters<typeof loadSessions>[0], {
+  await sessionCapability(state).refresh({
     ...createChatSessionsLoadOverrides(state),
     ...scopedAgentListParamsForSession(state, state.sessionKey),
+    force: true,
   });
 }
 
@@ -294,11 +303,9 @@ function createChatSessionPickerRequestParams(
     search: options.query,
     offset: options.offset,
   });
-  const params: Record<string, unknown> = {
-    includeGlobal: overrides.includeGlobal,
-    includeUnknown: overrides.includeUnknown,
-    configuredAgentsOnly: overrides.configuredAgentsOnly,
-    limit: overrides.limit,
+  const params: Parameters<SessionCapability["list"]>[0] = {
+    ...overrides,
+    ...scopedAgentListParamsForSession(state, state.sessionKey),
   };
   const activeAgentSession = parseAgentSessionKey(state.sessionKey);
   const activeSessionRow = state.sessionsResult?.sessions.find(
@@ -313,17 +320,6 @@ function createChatSessionPickerRequestParams(
     params.agentId = normalizeAgentId(
       activeAgentSession?.agentId ?? state.agentsList?.defaultId ?? "main",
     );
-  }
-  const offset =
-    typeof overrides.offset === "number" && Number.isFinite(overrides.offset)
-      ? Math.max(0, Math.floor(overrides.offset))
-      : 0;
-  if (offset > 0) {
-    params.offset = offset;
-  }
-  const search = normalizeOptionalString(overrides.search ?? undefined);
-  if (search) {
-    params.search = search;
   }
   return params;
 }
@@ -387,13 +383,13 @@ async function loadChatSessionPickerPage(
   state.chatSessionPickerError = null;
   requestHostUpdate(state);
   try {
-    const page = projectChatSessionPickerResult(
-      state,
-      await state.client.request<SessionsListResult>(
-        "sessions.list",
-        createChatSessionPickerRequestParams(state, { query, offset: options.offset }),
-      ),
+    const pageResult = await sessionCapability(state).list(
+      createChatSessionPickerRequestParams(state, { query, offset: options.offset }),
     );
+    if (!pageResult) {
+      return;
+    }
+    const page = projectChatSessionPickerResult(state, pageResult);
     if (!isCurrentChatSessionPickerSearchRequest(state, requestId)) {
       return null;
     }
@@ -1355,11 +1351,13 @@ async function switchChatFastMode(state: AppViewState, nextFastMode: "" | "on" |
   setChatError(state, null);
   patchSessionFastMode(state, targetSessionKey, next);
   try {
-    await state.client.request("sessions.patch", {
-      key: targetSessionKey,
-      ...scopedAgentParamsForSession(state, targetSessionKey),
-      fastMode: next ?? null,
-    });
+    await sessionCapability(state).patch(
+      targetSessionKey,
+      {
+        fastMode: next ?? null,
+      },
+      scopedAgentParamsForSession(state, targetSessionKey),
+    );
     await refreshSessionOptions(state);
     patchSessionFastMode(state, targetSessionKey, next);
   } catch (err) {
@@ -1384,7 +1382,6 @@ async function switchChatModel(state: AppViewState, nextModel: string): Promise<
     ...state.chatModelOverrides,
     [targetSessionKey]: createChatModelOverride(nextModel),
   };
-  const client = state.client;
   const switchPromiseRef: { current?: Promise<boolean> } = {};
   const clearPendingSwitch = () => {
     if (state.chatModelSwitchPromises?.[targetSessionKey] === switchPromiseRef.current) {
@@ -1395,11 +1392,13 @@ async function switchChatModel(state: AppViewState, nextModel: string): Promise<
   };
   const switchPromise: Promise<boolean> = (async () => {
     try {
-      await client.request("sessions.patch", {
-        key: targetSessionKey,
-        ...scopedAgentParamsForSession(state, targetSessionKey),
-        model: nextModel || null,
-      });
+      await sessionCapability(state).patch(
+        targetSessionKey,
+        {
+          model: nextModel || null,
+        },
+        scopedAgentParamsForSession(state, targetSessionKey),
+      );
       void refreshVisibleToolsEffectiveForCurrentSessionLazy(state);
       await refreshSessionOptions(state);
       return true;
@@ -1457,11 +1456,13 @@ async function switchChatThinkingLevel(state: AppViewState, nextThinkingLevel: s
   patchSessionThinkingLevel(state, targetSessionKey, normalizedNext);
   state.chatThinkingLevel = normalizedNext ?? null;
   try {
-    await state.client.request("sessions.patch", {
-      key: targetSessionKey,
-      ...scopedAgentParamsForSession(state, targetSessionKey),
-      thinkingLevel: normalizedNext ?? null,
-    });
+    await sessionCapability(state).patch(
+      targetSessionKey,
+      {
+        thinkingLevel: normalizedNext ?? null,
+      },
+      scopedAgentParamsForSession(state, targetSessionKey),
+    );
     await refreshSessionOptions(state);
     patchSessionThinkingLevel(state, targetSessionKey, normalizedNext);
     state.chatThinkingLevel = normalizedNext ?? null;
