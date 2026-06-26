@@ -1304,17 +1304,18 @@
 }
 
 .content--sessions {
-  --sessions-bg: color-mix(in srgb, var(--danger) 72%, black);
+  --sessions-bg: #58a63c;
+  --sessions-foreground: #081108;
   --bg-content: var(--sessions-bg);
   background: var(--sessions-bg);
 }
 
 .content--sessions .page-title {
-  color: var(--destructive-foreground);
+  color: var(--sessions-foreground);
 }
 
 .content--sessions .page-sub {
-  color: var(--destructive-foreground);
+  color: var(--sessions-foreground);
 }
 
 .content--chat {
