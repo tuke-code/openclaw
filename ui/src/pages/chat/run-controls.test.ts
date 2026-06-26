@@ -383,7 +383,6 @@ describe("context notice", () => {
     expect(notice!.textContent?.replace(/\s+/gu, " ").trim()).toBe("95% context used 190k / 200k");
     expect(notice!.querySelector(".context-notice__detail")?.textContent).toBe("190k / 200k");
     expect([...notice!.classList]).toEqual(["context-notice", "context-notice--warning"]);
-    expect(notice!.getAttribute("title")).toBe("Session context usage: 190k / 200k (95%)");
     expect(notice!.style.getPropertyValue("--ctx-color")).toBe("rgb(4, 5, 6)");
     expect(notice!.style.getPropertyValue("--ctx-bg")).toBe("rgba(4, 5, 6, 0.15999999999999998)");
 

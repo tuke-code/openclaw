@@ -414,6 +414,9 @@ export class AppSidebar extends LitElement {
   }
 
   override render() {
+    const gatewayStatus = t("chat.gatewayStatus", {
+      status: this.connected ? t("common.online") : t("common.offline"),
+    });
     return html`
       <aside class="sidebar ${this.collapsed ? "sidebar--collapsed" : ""}">
         <div class="sidebar-shell">
@@ -508,39 +511,33 @@ export class AppSidebar extends LitElement {
               </div>
               ${this.version
                 ? html`
-                    <div class="sidebar-version" title=${`v${this.version}`}>
+                    <div class="sidebar-version">
                       ${!this.collapsed
                         ? html`
                             <span class="sidebar-version__label">${t("common.version")}</span>
                             <span class="sidebar-version__text">v${this.version}</span>
-                            <span
-                              class="sidebar-version__status ${this.connected
-                                ? "sidebar-connection-status--online"
-                                : "sidebar-connection-status--offline"}"
-                              role="img"
-                              aria-live="polite"
-                              aria-label=${t("chat.gatewayStatus", {
-                                status: this.connected ? t("common.online") : t("common.offline"),
-                              })}
-                              title=${t("chat.gatewayStatus", {
-                                status: this.connected ? t("common.online") : t("common.offline"),
-                              })}
-                            ></span>
+                            <openclaw-tooltip .content=${gatewayStatus}>
+                              <span
+                                class="sidebar-version__status ${this.connected
+                                  ? "sidebar-connection-status--online"
+                                  : "sidebar-connection-status--offline"}"
+                                role="img"
+                                aria-live="polite"
+                                aria-label=${gatewayStatus}
+                              ></span>
+                            </openclaw-tooltip>
                           `
                         : html`
-                            <span
-                              class="sidebar-version__status ${this.connected
-                                ? "sidebar-connection-status--online"
-                                : "sidebar-connection-status--offline"}"
-                              role="img"
-                              aria-live="polite"
-                              aria-label=${t("chat.gatewayStatus", {
-                                status: this.connected ? t("common.online") : t("common.offline"),
-                              })}
-                              title=${t("chat.gatewayStatus", {
-                                status: this.connected ? t("common.online") : t("common.offline"),
-                              })}
-                            ></span>
+                            <openclaw-tooltip .content=${`v${this.version} · ${gatewayStatus}`}>
+                              <span
+                                class="sidebar-version__status ${this.connected
+                                  ? "sidebar-connection-status--online"
+                                  : "sidebar-connection-status--offline"}"
+                                role="img"
+                                aria-live="polite"
+                                aria-label=${gatewayStatus}
+                              ></span>
+                            </openclaw-tooltip>
                           `}
                     </div>
                   `

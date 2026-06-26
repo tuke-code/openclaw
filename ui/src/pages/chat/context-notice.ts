@@ -122,7 +122,7 @@ export function renderContextNotice(
       class="context-notice ${model.warning ? "context-notice--warning" : "context-notice--usage"}"
       role="status"
       style="--ctx-color:${model.color};--ctx-bg:${model.bg}"
-      title=${`Session context usage: ${model.detail} (${model.pct}%)`}
+      aria-label=${`Session context usage: ${model.detail} (${model.pct}%)`}
     >
       ${model.warning
         ? html`
