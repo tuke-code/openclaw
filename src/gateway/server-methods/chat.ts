@@ -4022,7 +4022,7 @@ export const chatHandlers: GatewayRequestHandlers = {
           }
           return {
             sessionId: resolvedSessionId,
-            ...(entry?.sessionId ? { expectedSessionId: entry.sessionId } : {}),
+            ...(latestEntry?.sessionId ? { expectedSessionId: latestEntry.sessionId } : {}),
             sessionKey,
             sessionEntry: latestEntry ?? entry,
             sessionStore: latestStore,
