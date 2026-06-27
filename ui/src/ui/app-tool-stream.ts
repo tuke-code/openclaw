@@ -1,4 +1,5 @@
 import { formatUnknownText, truncateText } from "../lib/format.ts";
+import type { SessionCapability } from "../lib/sessions/index.ts";
 import {
   buildAgentMainSessionKey,
   DEFAULT_AGENT_ID,
@@ -9,8 +10,6 @@ import {
 import { normalizeLowercaseStringOrEmpty } from "../lib/string-coerce.ts";
 // Control UI module implements app tool stream behavior.
 import { updateActivityFromToolEvent, type ActivityEntry } from "../pages/activity/data.ts";
-import { createChatModelOverride } from "./chat-model-ref.ts";
-import type { ChatModelOverride } from "./chat-model-ref.types.ts";
 
 const TOOL_STREAM_LIMIT = 50;
 const TOOL_STREAM_THROTTLE_MS = 80;
@@ -67,7 +66,7 @@ type ToolStreamHost = {
   chatToolMessages: Record<string, unknown>[];
   activityEntries?: ActivityEntry[];
   toolStreamSyncTimer: number | null;
-  chatModelOverrides?: Record<string, ChatModelOverride | null>;
+  sessions: Pick<SessionCapability, "setModelOverride">;
 };
 
 type SessionDefaultsSnapshot = {
@@ -217,27 +216,24 @@ function readRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" ? (value as Record<string, unknown>) : null;
 }
 
-function resolveSessionStatusModelOverride(result: unknown): ChatModelOverride | null | undefined {
+function resolveSessionStatusModelOverride(result: unknown): string | null | undefined {
   const details = readRecord(readRecord(result)?.details);
   if (!details || details.changedModel !== true) {
     return undefined;
   }
   if (Object.hasOwn(details, "modelOverride")) {
     const override = toTrimmedString(details.modelOverride);
-    return override ? createChatModelOverride(override) : null;
+    return override;
   }
   const model = toTrimmedString(details.model);
   if (!model) {
     return undefined;
   }
   const provider = toTrimmedString(details.modelProvider);
-  return createChatModelOverride(provider ? `${provider}/${model}` : model);
+  return provider ? `${provider}/${model}` : model;
 }
 
 function syncSessionStatusModelOverride(host: ToolStreamHost, data: Record<string, unknown>) {
-  if (!host.chatModelOverrides) {
-    return;
-  }
   const result = data.result;
   const details = readRecord(readRecord(result)?.details);
   const targetSessionKey = toTrimmedString(details?.sessionKey) ?? host.sessionKey;
@@ -250,10 +246,7 @@ function syncSessionStatusModelOverride(host: ToolStreamHost, data: Record<strin
   if (override === undefined) {
     return;
   }
-  host.chatModelOverrides = {
-    ...host.chatModelOverrides,
-    [targetSessionKey]: override,
-  };
+  host.sessions.setModelOverride(targetSessionKey, override);
 }
 
 function readSessionDefaults(host: ToolStreamHost): SessionDefaultsSnapshot | undefined {
