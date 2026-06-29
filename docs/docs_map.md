@@ -6929,6 +6929,7 @@ Do not edit it by hand; run `pnpm docs:map:gen`.
   - H2: defineChannelPluginEntry
   - H2: defineSetupPluginEntry
   - H2: Registration mode
+  - H2: Background service context
   - H2: Plugin shapes
   - H2: Related
 

@@ -4,7 +4,12 @@ import type { OpenClawConfig } from "../config/types.openclaw.js";
 import {
   emitTrustedDiagnosticEventWithPrivateData,
   onTrustedInternalDiagnosticEvent,
+  type DiagnosticEventPayload,
 } from "../infra/diagnostic-events.js";
+import {
+  isModelUsagePluginEventsEnabled,
+  onCoreModelUsageEvent,
+} from "../infra/model-usage-events.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import { withPluginHttpRouteRegistry } from "./http-registry.js";
 import type { PluginServiceRegistration } from "./registry-types.js";
@@ -13,12 +18,36 @@ import { encodeStartupTraceSegment } from "./startup-trace-segment.js";
 import type { OpenClawPluginServiceContext, PluginLogger } from "./types.js";
 
 const log = createSubsystemLogger("plugins");
+type DiagnosticUsageEvent = Extract<DiagnosticEventPayload, { type: "model.usage" }>;
+type PluginModelUsage = NonNullable<OpenClawPluginServiceContext["modelUsage"]>;
+type PluginModelUsageEvent = Parameters<Parameters<PluginModelUsage["onEvent"]>[0]>[0];
+
 function createPluginLogger(): PluginLogger {
   return {
     info: (msg) => log.info(msg),
     warn: (msg) => log.warn(msg),
     error: (msg) => log.error(msg),
     debug: (msg) => log.debug(msg),
+  };
+}
+
+function toPluginModelUsageEvent({
+  ts: timestampMs,
+  seq: sequence,
+  type: _type,
+  trace: _trace,
+  usage,
+  lastCallUsage,
+  context,
+  ...event
+}: DiagnosticUsageEvent): PluginModelUsageEvent {
+  return {
+    timestampMs,
+    sequence,
+    ...event,
+    usage: { ...usage },
+    ...(lastCallUsage !== undefined ? { lastCallUsage: { ...lastCallUsage } } : {}),
+    ...(context !== undefined ? { context: { ...context } } : {}),
   };
 }
 
@@ -41,6 +70,16 @@ function createServiceContext(params: {
     workspaceDir: params.workspaceDir,
     stateDir: STATE_DIR,
     logger: createPluginLogger(),
+    ...(isModelUsagePluginEventsEnabled(params.config)
+      ? {
+          modelUsage: {
+            onEvent: (listener) =>
+              onCoreModelUsageEvent((event) => {
+                listener(toPluginModelUsageEvent(event));
+              }),
+          },
+        }
+      : {}),
     ...(params.startupTrace
       ? {
           startupTrace: createScopedPluginServiceStartupTrace(
