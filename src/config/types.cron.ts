@@ -39,9 +39,10 @@ export type CronConfig = {
    * number of milliseconds. Bare numbers are milliseconds. Two-layer
    * enforcement: create/update rejects schedules below the floor (early
    * feedback), and the scheduler paces re-arms at fire time so consecutive
-   * fires stay at least this far apart, covering jobs that predate the limit.
-   * Omit or set `0` to disable the floor (default). One-shot `at` jobs are
-   * exempt; transient-failure retries follow `cron.retry`.
+   * fires stay at least this far apart (within a ~2s dispatch slack for timer
+   * jitter), covering jobs that predate the limit and recurring transient-error
+   * retries. Omit or set `0` to disable the floor (default). One-shot `at` jobs
+   * (and their retries) are exempt.
    */
   minInterval?: string | number;
   /** Override default retry policy for one-shot jobs on transient errors. */

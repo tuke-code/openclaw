@@ -54,7 +54,8 @@ const CRON_MIN_INTERVAL_SAMPLE_RUNS = 6;
 /**
  * Dispatch jitter absorbed by the fire-time floor so a schedule whose cadence
  * exactly equals cron.minInterval is not deferred off its slots (and warned)
- * by a few ms of timer latency on every run.
+ * by a few ms of timer latency on every run. Clamped to at most half the
+ * configured floor in minIntervalFloorAtMs so small floors still pace.
  */
 const CRON_MIN_INTERVAL_DISPATCH_SLACK_MS = 2_000;
 const staggerOffsetCache = new Map<string, number>();
@@ -391,7 +392,11 @@ export function minIntervalFloorAtMs(
   if (minIntervalMs <= 0) {
     return 0;
   }
-  return lastFireStartedAtMs + minIntervalMs - CRON_MIN_INTERVAL_DISPATCH_SLACK_MS;
+  // Clamp the jitter slack to half the interval so the floor stays strictly
+  // after the previous fire; otherwise a floor <= the slack subtracts to a
+  // timestamp at/before lastRun and silently stops pacing pre-existing fast jobs.
+  const slackMs = Math.min(CRON_MIN_INTERVAL_DISPATCH_SLACK_MS, Math.floor(minIntervalMs / 2));
+  return lastFireStartedAtMs + minIntervalMs - slackMs;
 }
 
 /** Validates that session target and payload kind form a supported cron job shape. */
