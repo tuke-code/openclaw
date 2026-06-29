@@ -165,6 +165,7 @@ export type ChatProps = {
   autoExpandToolCalls?: boolean;
   attachments?: ChatAttachment[];
   onAttachmentsChange?: (attachments: ChatAttachment[]) => void;
+  onAssistantAttachmentLoaded?: () => void;
   showNewMessages?: boolean;
   onScrollToBottom?: () => void;
   onAssistantAttachmentLoaded?: () => void;
@@ -2408,6 +2409,7 @@ export function renderChat(props: ChatProps) {
                     basePath: props.basePath,
                     localMediaPreviewRoots: props.localMediaPreviewRoots ?? [],
                     assistantAttachmentAuthToken: props.assistantAttachmentAuthToken ?? null,
+                    onAssistantAttachmentLoaded: props.onAssistantAttachmentLoaded,
                     canvasPluginSurfaceUrl: props.canvasPluginSurfaceUrl,
                     embedSandboxMode: props.embedSandboxMode ?? "scripts",
                     allowExternalEmbedUrls: props.allowExternalEmbedUrls ?? false,

@@ -433,6 +433,7 @@ type RenderMessageGroupOptions = {
   basePath?: string;
   localMediaPreviewRoots?: readonly string[];
   assistantAttachmentAuthToken?: string | null;
+  onAssistantAttachmentLoaded?: () => void;
   canvasPluginSurfaceUrl?: string | null;
   embedSandboxMode?: EmbedSandboxMode;
   allowExternalEmbedUrls?: boolean;
@@ -467,6 +468,7 @@ function buildGroupedMessageRenderOptions(
     basePath: opts.basePath,
     localMediaPreviewRoots: opts.localMediaPreviewRoots,
     assistantAttachmentAuthToken: opts.assistantAttachmentAuthToken,
+    onAssistantAttachmentLoaded: opts.onAssistantAttachmentLoaded,
     embedSandboxMode: opts.embedSandboxMode,
     allowExternalEmbedUrls: opts.allowExternalEmbedUrls,
   };

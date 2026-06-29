@@ -1853,6 +1853,7 @@ export class ChatPage extends LitElement {
       allowExternalEmbedUrls: state.allowExternalEmbedUrls,
       chatMessageMaxWidth: state.chatMessageMaxWidth,
       assistantAttachmentAuthToken: resolveAssistantAttachmentAuthToken(state as never),
+      onAssistantAttachmentLoaded: () => state.scrollToBottom(),
       basePath: state.basePath,
     };
     return renderChat(props);
