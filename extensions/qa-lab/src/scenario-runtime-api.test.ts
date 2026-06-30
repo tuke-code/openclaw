@@ -183,6 +183,7 @@ describe("createQaScenarioRuntimeApi", () => {
     expect(api.assertNoGatewayLogSentinels).toBe(deps.assertNoGatewayLogSentinels);
     expect(api.readSessionTranscriptSummary).toBe(deps.readSessionTranscriptSummary);
     expect(typeof api.runChannelBehaviorScenario).toBe("function");
+    expect(typeof api.runConversation).toBe("function");
     for (const toolName of browserAndWebRuntimeTools) {
       expect(api[toolName]).toBe(deps[toolName]);
     }
@@ -290,26 +291,27 @@ describe("createQaScenarioRuntimeApi", () => {
       constants,
     });
 
-    const result = await api.runChannelBehaviorScenario({
-      id: "dm-chat-baseline",
-      channel: { id: "alice", kind: "direct" },
-      steps: [
+    const result = await api.runConversation({
+      target: "dm:alice",
+      from: "alice",
+      turns: [
         {
           id: "dm-reply",
           name: "gets reply",
-          inbound: {
-            senderId: "alice",
+          send: {
             text: "hello",
           },
           expect: {
-            kind: "reply",
-            textIncludes: ["QA-DM-BASELINE-OK"],
+            reply: {
+              includes: ["QA-DM-BASELINE-OK"],
+            },
           },
         },
       ],
     });
 
     expect(result.lastOutbound?.text).toBe("QA-DM-BASELINE-OK");
+    expect(result.lastReply?.text).toBe("QA-DM-BASELINE-OK");
     expect(
       state
         .getSnapshot()

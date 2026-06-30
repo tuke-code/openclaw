@@ -8,6 +8,7 @@ import {
   collectChannelBehaviorScenarioRequirements,
   createQaFlowChannelScenarioDriver,
   defineChannelBehaviorScenario,
+  defineChannelBehaviorScenarioFromConversation,
   matchesChannelBehaviorOutbound,
   runChannelBehaviorScenario,
   type ChannelScenarioDriver,
@@ -86,6 +87,101 @@ describe("channel behavior scenarios", () => {
         ],
       }),
     ).toThrow("duplicate channel behavior step id: same");
+  });
+
+  it("maps concise conversation input into a channel behavior scenario", () => {
+    const scenario = defineChannelBehaviorScenario(
+      defineChannelBehaviorScenarioFromConversation(
+        {
+          target: "dm:alice",
+          from: {
+            id: "alice",
+            name: "Alice",
+          },
+          turns: [
+            {
+              id: "dm-reply",
+              name: "gets exact marker reply",
+              send: {
+                text: "include QA-DM-BASELINE-OK",
+              },
+              expect: {
+                reply: {
+                  includes: ["QA-DM-BASELINE-OK"],
+                  timeoutMs: 500,
+                },
+              },
+            },
+            {
+              id: "quiet",
+              name: "stays quiet",
+              send: "do not reply",
+              expect: {
+                noReply: {
+                  windowMs: 250,
+                },
+              },
+            },
+          ],
+        },
+        { scenarioId: "dm-chat-baseline" },
+      ),
+    );
+
+    expect(scenario).toMatchObject({
+      id: "dm-chat-baseline",
+      channel: { id: "alice", kind: "direct" },
+      steps: [
+        {
+          id: "dm-reply",
+          name: "gets exact marker reply",
+          inbound: {
+            senderId: "alice",
+            senderName: "Alice",
+            text: "include QA-DM-BASELINE-OK",
+          },
+          expect: {
+            kind: "reply",
+            textIncludes: ["QA-DM-BASELINE-OK"],
+            timeoutMs: 500,
+          },
+        },
+        {
+          id: "quiet",
+          inbound: {
+            senderId: "alice",
+            senderName: "Alice",
+            text: "do not reply",
+          },
+          expect: {
+            kind: "no-reply",
+            quietMs: 250,
+          },
+        },
+      ],
+    });
+  });
+
+  it("rejects in-thread conversation expectations without a created thread", () => {
+    expect(() =>
+      defineChannelBehaviorScenarioFromConversation(
+        {
+          target: "channel:qa-room",
+          turns: [
+            {
+              send: "reply in the current thread",
+              expect: {
+                reply: {
+                  inThread: true,
+                  includes: ["done"],
+                },
+              },
+            },
+          ],
+        },
+        { scenarioId: "threadless" },
+      ),
+    ).toThrow("expects an in-thread reply but does not create a thread");
   });
 
   it("summarizes driver capabilities needed by channel steps", () => {

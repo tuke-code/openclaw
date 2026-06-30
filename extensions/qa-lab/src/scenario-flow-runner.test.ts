@@ -4,6 +4,7 @@ import { createQaBusState } from "./bus-state.js";
 import {
   createQaFlowChannelScenarioDriver,
   defineChannelBehaviorScenario,
+  defineChannelBehaviorScenarioFromConversation,
   runChannelBehaviorScenario as runDefinedChannelBehaviorScenario,
 } from "./channel-behavior-scenario.js";
 import type { QaTransportState } from "./qa-transport.js";
@@ -53,6 +54,9 @@ async function runLoadedScenarioFlow(
     resetBus: async () => {
       state.reset();
     },
+    resetTransport: async () => {
+      state.reset();
+    },
     injectInboundMessage: state.addInboundMessage.bind(state),
     runAgentPrompt: async () => undefined,
     formatTransportTranscript: formatTestTranscript,
@@ -78,6 +82,39 @@ async function runLoadedScenarioFlow(
     ) =>
       await runDefinedChannelBehaviorScenario(
         defineChannelBehaviorScenario(input),
+        createQaFlowChannelScenarioDriver({
+          state,
+          sendInboundMessage: state.addInboundMessage.bind(state),
+          waitForNoOutbound: async () => undefined,
+          waitForOutboundMessage: async (
+            stateLocal: QaTransportState,
+            predicate,
+            timeoutMs,
+            options,
+          ) => {
+            waitCount += 1;
+            params.onWaitForOutboundMessage?.({ waitCount, state: stateLocal });
+            const match = stateLocal
+              .getSnapshot()
+              .messages.filter((message) => message.direction === "outbound")
+              .slice(options?.sinceIndex ?? 0)
+              .find(predicate);
+            if (match) {
+              return match;
+            }
+            throw new Error(`timed out after ${timeoutMs}ms waiting for outbound marker`);
+          },
+        }),
+      ),
+    runConversation: async (
+      input: Parameters<typeof defineChannelBehaviorScenarioFromConversation>[0],
+    ) =>
+      await runDefinedChannelBehaviorScenario(
+        defineChannelBehaviorScenario(
+          defineChannelBehaviorScenarioFromConversation(input, {
+            scenarioId: scenario.id,
+          }),
+        ),
         createQaFlowChannelScenarioDriver({
           state,
           sendInboundMessage: state.addInboundMessage.bind(state),

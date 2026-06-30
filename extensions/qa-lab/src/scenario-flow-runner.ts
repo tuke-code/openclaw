@@ -162,6 +162,23 @@ async function runFlowAction(action: unknown, api: QaFlowApi, vars: QaFlowVars) 
     }
     return;
   }
+  if ("conversation" in action) {
+    const callable = resolveCallable("runConversation", api, vars);
+    const result = await callable(await resolveValue(action.conversation, api, vars));
+    if (typeof action.saveAs === "string" && action.saveAs.trim()) {
+      vars[action.saveAs.trim()] = result;
+    }
+    return;
+  }
+  if (action.reset === "bus" || action.reset === "transport") {
+    const callable = resolveCallable(
+      action.reset === "bus" ? "resetBus" : "resetTransport",
+      api,
+      vars,
+    );
+    await callable();
+    return;
+  }
   if (typeof action.set === "string") {
     vars[action.set] = await resolveValue(action.value, api, vars);
     return;

@@ -149,9 +149,59 @@ export type ChannelBehaviorScenarioStepResult = {
 };
 
 export type ChannelBehaviorScenarioRunResult = {
+  lastReply?: QaBusMessage;
   lastOutbound?: QaBusMessage;
   scenarioId: string;
   steps: ChannelBehaviorScenarioStepResult[];
+};
+
+type ChannelBehaviorConversationActorInput =
+  | string
+  | {
+      id?: string;
+      name?: string;
+    };
+
+type ChannelBehaviorConversationSendInput =
+  | string
+  | {
+      attachments?: QaBusAttachment[];
+      text: string;
+      toolCalls?: QaBusToolCall[];
+    };
+
+type ChannelBehaviorConversationReplyExpectationInput = {
+  includes?: readonly string[];
+  inThread?: boolean;
+  timeoutMs?: number;
+};
+
+type ChannelBehaviorConversationNoReplyExpectationInput = {
+  windowMs?: number;
+};
+
+type ChannelBehaviorConversationTurnExpectationInput = {
+  noReply?: ChannelBehaviorConversationNoReplyExpectationInput;
+  reply?: ChannelBehaviorConversationReplyExpectationInput;
+};
+
+type ChannelBehaviorConversationThreadInput = {
+  title?: string;
+};
+
+type ChannelBehaviorConversationTurnInput = {
+  createThread?: ChannelBehaviorConversationThreadInput;
+  expect: ChannelBehaviorConversationTurnExpectationInput;
+  id?: string;
+  name?: string;
+  send?: ChannelBehaviorConversationSendInput;
+};
+
+export type ChannelBehaviorConversationInput = {
+  from?: ChannelBehaviorConversationActorInput;
+  id?: string;
+  target: string | ChannelBehaviorScenarioChannel;
+  turns: readonly ChannelBehaviorConversationTurnInput[];
 };
 
 export type QaFlowChannelScenarioDriverParams = {
@@ -279,7 +329,46 @@ export async function runChannelBehaviorScenario(
   return {
     scenarioId: scenario.id,
     steps: results,
+    ...(lastOutbound ? { lastReply: lastOutbound } : {}),
     ...(lastOutbound ? { lastOutbound } : {}),
+  };
+}
+
+export function defineChannelBehaviorScenarioFromConversation(
+  input: ChannelBehaviorConversationInput,
+  options: { scenarioId: string },
+): ChannelBehaviorScenarioDefinitionInput {
+  const scenarioId = requireNonEmpty(input.id ?? options.scenarioId, "scenario id");
+  if (input.turns.length === 0) {
+    throw new Error(`channel behavior conversation ${scenarioId} must define at least one turn`);
+  }
+  const actor = normalizeConversationActor(input.from);
+  const channel = normalizeChannelBehaviorTarget(input.target);
+  return {
+    id: scenarioId,
+    channel,
+    steps: input.turns.map((turn, index) => {
+      const stepId = requireNonEmpty(turn.id ?? `turn-${index + 1}`, `turn ${index + 1} id`);
+      return {
+        id: stepId,
+        name: requireNonEmpty(turn.name ?? stepId, `turn ${stepId} name`),
+        ...(turn.createThread
+          ? {
+              thread: {
+                createBeforeStep: true,
+                required: true,
+                ...(turn.createThread.title ? { title: turn.createThread.title } : {}),
+              },
+            }
+          : {}),
+        ...(turn.send
+          ? {
+              inbound: buildConversationInbound(turn.send, actor),
+            }
+          : {}),
+        expect: buildConversationExpectation(turn.expect, turn),
+      };
+    }),
   };
 }
 
@@ -470,6 +559,86 @@ function normalizeChannel(channel: ChannelBehaviorScenarioChannel): ChannelBehav
   return {
     ...channel,
     id: requireNonEmpty(channel.id, "channel id"),
+  };
+}
+
+function normalizeChannelBehaviorTarget(
+  target: string | ChannelBehaviorScenarioChannel,
+): ChannelBehaviorScenarioChannel {
+  if (typeof target !== "string") {
+    return normalizeChannel(target);
+  }
+  const trimmed = requireNonEmpty(target, "target");
+  if (trimmed.startsWith("dm:")) {
+    return { id: requireNonEmpty(trimmed.slice("dm:".length), "target id"), kind: "direct" };
+  }
+  if (trimmed.startsWith("channel:")) {
+    return { id: requireNonEmpty(trimmed.slice("channel:".length), "target id"), kind: "channel" };
+  }
+  if (trimmed.startsWith("group:")) {
+    return { id: requireNonEmpty(trimmed.slice("group:".length), "target id"), kind: "group" };
+  }
+  return { id: trimmed, kind: "direct" };
+}
+
+function normalizeConversationActor(input?: ChannelBehaviorConversationActorInput): {
+  senderId?: string;
+  senderName?: string;
+} {
+  if (typeof input === "string") {
+    return { senderId: requireNonEmpty(input, "sender id") };
+  }
+  if (!input) {
+    return {};
+  }
+  return {
+    ...(input.id ? { senderId: requireNonEmpty(input.id, "sender id") } : {}),
+    ...(input.name ? { senderName: requireNonEmpty(input.name, "sender name") } : {}),
+  };
+}
+
+function buildConversationInbound(
+  send: ChannelBehaviorConversationSendInput,
+  actor: ReturnType<typeof normalizeConversationActor>,
+): ChannelBehaviorScenarioInbound {
+  if (typeof send === "string") {
+    return {
+      ...actor,
+      text: send,
+    };
+  }
+  return {
+    ...actor,
+    text: send.text,
+    ...(send.attachments ? { attachments: send.attachments } : {}),
+    ...(send.toolCalls ? { toolCalls: send.toolCalls } : {}),
+  };
+}
+
+function buildConversationExpectation(
+  expectation: ChannelBehaviorConversationTurnExpectationInput,
+  turn: ChannelBehaviorConversationTurnInput,
+): ChannelBehaviorScenarioExpectation {
+  if (expectation.noReply) {
+    return {
+      kind: "no-reply",
+      ...(expectation.noReply.windowMs ? { quietMs: expectation.noReply.windowMs } : {}),
+    };
+  }
+  if (!expectation.reply) {
+    throw new Error(
+      `channel behavior conversation turn ${turn.id ?? turn.name ?? "turn"} must expect reply or noReply`,
+    );
+  }
+  if (expectation.reply.inThread && !turn.createThread) {
+    throw new Error(
+      `channel behavior conversation turn ${turn.id ?? turn.name ?? "turn"} expects an in-thread reply but does not create a thread`,
+    );
+  }
+  return {
+    kind: "reply",
+    ...(expectation.reply.includes ? { textIncludes: expectation.reply.includes } : {}),
+    ...(expectation.reply.timeoutMs ? { timeoutMs: expectation.reply.timeoutMs } : {}),
   };
 }
 

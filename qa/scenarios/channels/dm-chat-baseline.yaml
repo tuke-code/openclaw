@@ -31,31 +31,25 @@ flow:
   steps:
     - name: replies coherently in DM
       actions:
-        - call: resetBus
-        - call: runChannelBehaviorScenario
-          saveAs: channelRun
-          args:
-            - id: dm-chat-baseline
-              channel:
-                id: alice
-                kind: direct
-              steps:
-                - id: dm-reply
-                  name: gets exact marker reply
-                  inbound:
-                    senderId: alice
-                    senderName: Alice
-                    text:
-                      ref: config.prompt
-                  expect:
-                    kind: reply
-                    textIncludes:
+        - reset: transport
+        - conversation:
+            target: dm:alice
+            from:
+              id: alice
+              name: Alice
+            turns:
+              - id: dm-reply
+                name: gets exact marker reply
+                send:
+                  text:
+                    ref: config.prompt
+                expect:
+                  reply:
+                    includes:
                       - ref: config.expectedMarker
                     timeoutMs:
                       expr: liveTurnTimeoutMs(env, 45000)
-        - set: outbound
-          value:
-            ref: channelRun.lastOutbound
+          saveAs: chat
         - set: matchingOutbound
           value:
             expr: "state.getSnapshot().messages.filter((candidate) => candidate.direction === 'outbound' && candidate.conversation.id === 'alice' && candidate.conversation.kind === 'direct' && String(candidate.text ?? '').includes(config.expectedMarker))"
@@ -63,4 +57,4 @@ flow:
             expr: matchingOutbound.length === 1
             message:
               expr: "`expected exactly one DM baseline marker reply, saw ${matchingOutbound.length}; transcript=${formatTransportTranscript(state, { conversationId: 'alice' })}`"
-      detailsExpr: outbound.text
+      detailsExpr: chat.lastReply.text

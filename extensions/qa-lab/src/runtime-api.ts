@@ -12,10 +12,12 @@ export {
   collectChannelBehaviorScenarioRequirements,
   createQaFlowChannelScenarioDriver,
   defineChannelBehaviorScenario,
+  defineChannelBehaviorScenarioFromConversation,
   matchesChannelBehaviorOutbound,
   runChannelBehaviorScenario,
 } from "./channel-behavior-scenario.js";
 export type {
+  ChannelBehaviorConversationInput,
   ChannelBehaviorScenarioChannel,
   ChannelBehaviorScenarioDefinition,
   ChannelBehaviorScenarioDefinitionInput,

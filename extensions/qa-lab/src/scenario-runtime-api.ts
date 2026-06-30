@@ -4,7 +4,9 @@ import type * as NodePath from "node:path";
 import {
   createQaFlowChannelScenarioDriver,
   defineChannelBehaviorScenario,
+  defineChannelBehaviorScenarioFromConversation,
   runChannelBehaviorScenario as runDefinedChannelBehaviorScenario,
+  type ChannelBehaviorConversationInput,
   type ChannelBehaviorScenarioDefinitionInput,
   type ChannelBehaviorScenarioRunResult,
 } from "./channel-behavior-scenario.js";
@@ -224,6 +226,9 @@ type QaScenarioRuntimeApi<
   runChannelBehaviorScenario: (
     input: ChannelBehaviorScenarioDefinitionInput,
   ) => Promise<ChannelBehaviorScenarioRunResult>;
+  runConversation: (
+    input: ChannelBehaviorConversationInput,
+  ) => Promise<ChannelBehaviorScenarioRunResult>;
 };
 
 export function createQaScenarioRuntimeApi<
@@ -265,6 +270,12 @@ export function createQaScenarioRuntimeApi<
     });
     return await runDefinedChannelBehaviorScenario(defineChannelBehaviorScenario(input), driver);
   };
+  const runConversation = async (input: ChannelBehaviorConversationInput) =>
+    await runChannelBehaviorScenario(
+      defineChannelBehaviorScenarioFromConversation(input, {
+        scenarioId: params.scenario.id,
+      }),
+    );
 
   return {
     env: params.env,
@@ -360,5 +371,6 @@ export function createQaScenarioRuntimeApi<
     resetBus: resetTransportState,
     reset: resetTransportState,
     runChannelBehaviorScenario,
+    runConversation,
   };
 }
