@@ -921,8 +921,7 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
     }
 
     const senderName = envelope.sourceName ?? senderDisplay;
-    const messageId =
-      typeof envelope.timestamp === "number" ? String(envelope.timestamp) : undefined;
+    const messageId = receiptTimestamp ? String(receiptTimestamp) : undefined;
     await inboundDebouncer.enqueue({
       senderName,
       senderDisplay,
@@ -933,7 +932,7 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
       isGroup,
       bodyText,
       commandBody: messageText,
-      timestamp: envelope.timestamp ?? undefined,
+      timestamp: receiptTimestamp,
       messageId,
       mediaPath,
       mediaType,

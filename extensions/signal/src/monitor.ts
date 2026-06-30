@@ -417,16 +417,15 @@ function resolveSignalNativeReplyOptions(params: {
   }
   const payloadReplyToId = normalizeOptionalString(params.payload.replyToId);
   const contextReplyToId = normalizeOptionalString(params.replyContext?.replyToId);
-  const replyToId = payloadReplyToId ?? contextReplyToId;
-  if (!replyToId || !contextReplyToId || replyToId !== contextReplyToId) {
+  if (!payloadReplyToId || !contextReplyToId || payloadReplyToId !== contextReplyToId) {
     return {};
   }
   const replyToAuthor = normalizeOptionalString(params.replyContext?.author);
   if (!replyToAuthor) {
-    return { replyToId };
+    return { replyToId: payloadReplyToId };
   }
   return {
-    replyToId,
+    replyToId: payloadReplyToId,
     replyToAuthor,
     replyToBody: params.replyContext?.body ?? "",
   };
