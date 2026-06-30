@@ -35,27 +35,24 @@ flow:
         - call: runChannelBehaviorScenario
           saveAs: channelRun
           args:
-            - expr: |-
-                ({
-                  id: "dm-chat-baseline",
-                  channel: { id: "alice", kind: "direct" },
-                  steps: [
-                    {
-                      id: "dm-reply",
-                      name: "gets exact marker reply",
-                      inbound: {
-                        senderId: "alice",
-                        senderName: "Alice",
-                        text: config.prompt,
-                      },
-                      expect: {
-                        kind: "reply",
-                        textIncludes: [config.expectedMarker],
-                        timeoutMs: liveTurnTimeoutMs(env, 45000),
-                      },
-                    },
-                  ],
-                })
+            - id: dm-chat-baseline
+              channel:
+                id: alice
+                kind: direct
+              steps:
+                - id: dm-reply
+                  name: gets exact marker reply
+                  inbound:
+                    senderId: alice
+                    senderName: Alice
+                    text:
+                      ref: config.prompt
+                  expect:
+                    kind: reply
+                    textIncludes:
+                      - ref: config.expectedMarker
+                    timeoutMs:
+                      expr: liveTurnTimeoutMs(env, 45000)
         - set: outbound
           value:
             ref: channelRun.lastOutbound
