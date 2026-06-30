@@ -1,4 +1,8 @@
 /** Starts, stops, and inspects plugin service registrations. */
+import {
+  findNormalizedProviderValue,
+  normalizeProviderId,
+} from "@openclaw/model-catalog-core/provider-id";
 import { STATE_DIR } from "../config/paths.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import {
@@ -51,8 +55,47 @@ function toPluginModelUsageEvent({
   };
 }
 
+function createModelUsageProviderIds(
+  registry: PluginRegistry,
+  pluginId: string,
+): ReadonlySet<string> {
+  const providerIds = new Set<string>();
+  for (const entry of registry.providers) {
+    if (entry.pluginId !== pluginId) {
+      continue;
+    }
+    const providerId = normalizeProviderId(entry.provider.id);
+    if (providerId) {
+      providerIds.add(providerId);
+    }
+  }
+  return providerIds;
+}
+
+function modelUsageEventMatchesProviderIds(params: {
+  config: OpenClawConfig;
+  event: DiagnosticUsageEvent;
+  providerIds: ReadonlySet<string>;
+}): boolean {
+  const normalizedProvider = normalizeProviderId(params.event.provider ?? "");
+  if (!normalizedProvider) {
+    return false;
+  }
+  if (params.providerIds.has(normalizedProvider)) {
+    return true;
+  }
+  const providerConfig = findNormalizedProviderValue(
+    params.config.models?.providers,
+    normalizedProvider,
+  );
+  const api =
+    typeof providerConfig?.api === "string" ? normalizeProviderId(providerConfig.api) : "";
+  return Boolean(api && params.providerIds.has(api));
+}
+
 function createServiceContext(params: {
   config: OpenClawConfig;
+  registry: PluginRegistry;
   startupTrace?: PluginServiceStartupTrace;
   workspaceDir?: string;
   service: PluginServiceRegistration;
@@ -64,6 +107,10 @@ function createServiceContext(params: {
   const grantsInternalDiagnostics =
     isDiagnosticsExporter &&
     (params.service?.origin === "bundled" || params.service?.trustedOfficialInstall === true);
+  const modelUsageProviderIds = createModelUsageProviderIds(
+    params.registry,
+    params.service.pluginId,
+  );
 
   return {
     config: params.config,
@@ -75,6 +122,15 @@ function createServiceContext(params: {
           modelUsage: {
             onEvent: (listener) =>
               onCoreModelUsageEvent((event) => {
+                if (
+                  !modelUsageEventMatchesProviderIds({
+                    config: params.config,
+                    event,
+                    providerIds: modelUsageProviderIds,
+                  })
+                ) {
+                  return;
+                }
                 listener(toPluginModelUsageEvent(event));
               }),
           },
@@ -147,6 +203,7 @@ export async function startPluginServices(params: {
     const traceName = createPluginServiceTraceName(entry);
     const serviceContext = createServiceContext({
       config: params.config,
+      registry: params.registry,
       startupTrace: params.startupTrace,
       workspaceDir: params.workspaceDir,
       service: entry,

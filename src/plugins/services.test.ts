@@ -2,7 +2,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { PluginOrigin } from "./plugin-origin.types.js";
 import { createEmptyPluginRegistry } from "./registry.js";
-import type { OpenClawPluginService, OpenClawPluginServiceContext } from "./types.js";
+import type {
+  OpenClawPluginService,
+  OpenClawPluginServiceContext,
+  ProviderPlugin,
+} from "./types.js";
 
 const mockedLogger = vi.hoisted(() => ({
   info: vi.fn<(msg: string) => void>(),
@@ -43,6 +47,7 @@ function createRegistry(
   pluginId = "plugin:test",
   origin: PluginOrigin = "workspace",
   trustedOfficialInstall = false,
+  providers: Array<{ pluginId?: string; provider: ProviderPlugin }> = [],
 ) {
   const registry = createEmptyPluginRegistry();
   registry.services = services.map((service) => ({
@@ -53,7 +58,22 @@ function createRegistry(
     ...(trustedOfficialInstall ? { trustedOfficialInstall } : {}),
     rootDir: "/plugins/test-plugin",
   })) as typeof registry.services;
+  registry.providers = providers.map((entry) => ({
+    pluginId: entry.pluginId ?? pluginId,
+    provider: entry.provider,
+    source: "test",
+    rootDir: "/plugins/test-plugin",
+  }));
   return registry;
+}
+
+function createProvider(id: string, overrides: Partial<ProviderPlugin> = {}): ProviderPlugin {
+  return {
+    id,
+    label: id,
+    auth: [],
+    ...overrides,
+  };
 }
 
 function createServiceConfig() {
@@ -399,7 +419,9 @@ describe("startPluginServices", () => {
       stop: () => unsubscribe?.(),
     };
     const handle = await startPluginServices({
-      registry: createRegistry([usageService], "usage-plugin"),
+      registry: createRegistry([usageService], "usage-plugin", "workspace", false, [
+        { provider: createProvider("openai") },
+      ]),
       config,
     });
 
@@ -500,6 +522,64 @@ describe("startPluginServices", () => {
       usage: { total: 1 },
     });
     expect(seen).toHaveLength(1);
+  });
+
+  it("scopes model usage events to provider owner services", async () => {
+    const seen: PluginModelUsageEvent[] = [];
+    let unsubscribe: (() => void) | undefined;
+    const config = {
+      ...createModelUsageServiceConfig(),
+      models: {
+        providers: {
+          "custom-openai": {
+            api: "openai",
+          },
+        },
+      },
+    } as Parameters<typeof startPluginServices>[0]["config"];
+    const usageService: OpenClawPluginService = {
+      id: "usage-reader",
+      start: (ctx) => {
+        if (!ctx.modelUsage) {
+          throw new Error("expected model usage subscription");
+        }
+        unsubscribe = ctx.modelUsage.onEvent((event) => {
+          seen.push(event);
+        });
+      },
+      stop: () => unsubscribe?.(),
+    };
+    const handle = await startPluginServices({
+      registry: createRegistry([usageService], "openai-plugin", "workspace", false, [
+        { pluginId: "openai-plugin", provider: createProvider("openai") },
+        { pluginId: "anthropic-plugin", provider: createProvider("anthropic") },
+      ]),
+      config,
+    });
+
+    emitModelUsageEvent(config, {
+      sessionKey: "other-provider",
+      provider: "anthropic",
+      usage: { total: 1 },
+    });
+    emitModelUsageEvent(config, {
+      sessionKey: "direct-provider",
+      provider: "openai",
+      usage: { total: 2 },
+    });
+    emitModelUsageEvent(config, {
+      sessionKey: "configured-alias",
+      provider: "custom-openai",
+      usage: { total: 3 },
+    });
+    emitModelUsageEvent(config, {
+      sessionKey: "missing-provider",
+      usage: { total: 4 },
+    });
+
+    expect(seen.map((event) => event.sessionKey)).toEqual(["direct-provider", "configured-alias"]);
+
+    await handle.stop();
   });
 
   it("grants internal diagnostics only to trusted diagnostics exporter services", async () => {

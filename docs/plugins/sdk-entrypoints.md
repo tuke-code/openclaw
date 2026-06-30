@@ -326,9 +326,10 @@ For CLI registrars specifically:
 
 Services registered with `api.registerService(...)` receive an
 `OpenClawPluginServiceContext`. Use `ctx.modelUsage?.onEvent(...)` to observe
-trusted model usage accounting without subscribing to the full internal
-diagnostic stream. Operators must explicitly enable the feed with
-`plugins.modelUsage.enabled: true`; `diagnostics.enabled` is not required:
+trusted model usage accounting for providers registered by the same plugin,
+without subscribing to the full internal diagnostic stream. Operators must
+explicitly enable the feed with `plugins.modelUsage.enabled: true`;
+`diagnostics.enabled` is not required:
 
 ```typescript
 let stopUsage: (() => void) | undefined;
@@ -352,7 +353,9 @@ agent/session ids, token buckets (`input`, `output`, `cacheRead`, `cacheWrite`,
 `promptTokens`, `total`), last-call usage when available, context window facts,
 estimated `costUsd`, and run duration. The surface exposes only model usage
 accounting; raw prompts, responses, tool payloads, and other diagnostics are not
-included.
+included. Events are scoped to the service plugin's registered provider ids;
+configured provider aliases such as `models.providers.<id>.api` resolve back to
+the owning provider plugin.
 
 ## Plugin shapes
 
