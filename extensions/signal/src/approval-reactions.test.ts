@@ -135,6 +135,75 @@ describe("Signal approval reactions", () => {
     });
   });
 
+  it("registers alias-configured outbound prompts under the canonical target", async () => {
+    const cfg = {
+      channels: {
+        signal: {
+          allowFrom: ["+15551230000"],
+          aliases: {
+            me: "+15551230000",
+          },
+        },
+      },
+      approvals: {
+        plugin: {
+          enabled: true,
+          mode: "targets" as const,
+          targets: [{ channel: "signal", to: "signal:me" }],
+        },
+      },
+    };
+    const text =
+      "Plugin approval required\nID: plugin:abc\n\nReply with: /approve plugin:abc allow-once|deny";
+    const textWithHint = appendSignalApprovalReactionHintForOutboundMessage({
+      cfg,
+      accountId: "default",
+      to: "+15551230000",
+      text,
+      targetAuthor: "+15550009999",
+    });
+
+    expect(textWithHint).toContain("React with:\n\n👍 Allow Once\n👎 Deny");
+    expect(
+      registerSignalApprovalReactionTargetForOutboundMessage({
+        cfg,
+        accountId: "default",
+        to: "+15551230000",
+        messageId: "1700000000010",
+        text: textWithHint,
+        targetAuthor: "+15550009999",
+      }),
+    ).toBe(true);
+
+    await expect(
+      resolveSignalApprovalReactionTargetWithPersistence({
+        accountId: "default",
+        conversationKey: "+15551230000",
+        messageId: "1700000000010",
+        reactionKey: "👍",
+        targetAuthor: "+15550009999",
+      }),
+    ).resolves.toMatchObject({
+      approvalId: "plugin:abc",
+      approvalKind: "plugin",
+      decision: "allow-once",
+      route: {
+        deliveryMode: "target",
+        to: "+15551230000",
+        accountId: "default",
+      },
+    });
+    await expect(
+      resolveSignalApprovalReactionTargetWithPersistence({
+        accountId: "default",
+        conversationKey: "me",
+        messageId: "1700000000010",
+        reactionKey: "👍",
+        targetAuthor: "+15550009999",
+      }),
+    ).resolves.toBeNull();
+  });
+
   it("keeps target-mode outbound prompts manual when the target route is disabled", () => {
     const text =
       "Plugin approval required\nID: plugin:abc\n\nReply with: /approve plugin:abc allow-once|deny";
