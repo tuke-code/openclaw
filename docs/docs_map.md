@@ -5572,6 +5572,7 @@ Do not edit it by hand; run `pnpm docs:map:gen`.
   - H2: Minimal example
   - H2: Rich example
   - H2: Top-level field reference
+  - H2: jsonRpc reference
   - H2: Generation provider metadata reference
   - H2: Tool metadata reference
   - H2: providerAuthChoices reference
@@ -8447,6 +8448,14 @@ Do not edit it by hand; run `pnpm docs:map:gen`.
   - H2: Signal setup (signal-cli)
   - H2: What the wizard writes
   - H2: Related docs
+
+## releases/index.md
+
+- Route: /releases
+- Headings:
+  - H1: Release notes
+  - H2: Coming soon
+  - H2: Raw release history
 
 ## security/CONTRIBUTING-THREAT-MODEL.md
 
