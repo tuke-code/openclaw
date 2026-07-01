@@ -186,6 +186,7 @@ struct RootTabs: View {
                 .tabItem { Label("Settings", systemImage: "gearshape.fill") }
                 .tag(AppTab.settings)
         }
+        .openClawTabBarBehavior()
     }
 
     private var sidebarSplitContent: some View {

@@ -107,9 +107,11 @@ final class OpenClawSnapshotUITests: XCTestCase {
         self.app?.terminate()
 
         let app = XCUIApplication()
-        setupSnapshot(app, waitForAnimations: false)
+        setupSnapshot(app)
         app.launchArguments += [
             "--openclaw-screenshot-mode",
+            "--openclaw-appearance",
+            "light",
             "--openclaw-initial-tab",
             target.initialTab,
             "--openclaw-initial-destination",
