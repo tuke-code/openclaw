@@ -627,7 +627,7 @@ describe("pairing setup code", () => {
                 cidr: "10.211.55.3/24",
               },
             ],
-          }) as ReturnType<NonNullable<ResolveSetupOptions["networkInterfaces"]>>,
+          }) as ReturnType<NonNullable<NonNullable<ResolveSetupOptions>["networkInterfaces"]>>,
         runCommandWithTimeout,
       } satisfies ResolveSetupOptions,
       expected: {
